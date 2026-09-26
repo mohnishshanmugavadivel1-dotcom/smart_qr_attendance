@@ -65,25 +65,36 @@
       
       <div style="margin-top:14px;background:#f8fafc;border:1px solid var(--border);border-radius:14px;padding:14px">
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <b style="font-size:13px"><i class="fa-solid fa-camera" style="color:var(--primary)"></i> Face Verification</b>
+          <b style="font-size:13px"><i class="fa-solid fa-camera" style="color:var(--primary)"></i> Face Verification — TEACHER ONLY</b>
           <div style="display:flex;gap:10px;align-items:center">
             <span id="faceToggleLabel" style="font-size:12px;font-weight:700;color:{% if session.face_verification_enabled %}#0f172a{% else %}var(--muted){% endif %}">{% if session.face_verification_enabled %}ON{% else %}OFF{% endif %}</span>
             <div class="switch {% if session.face_verification_enabled %}on{% endif %}" id="faceSwitch" onclick="toggleFace()"><span></span></div>
           </div>
         </div>
-        <div style="font-size:11px;color:var(--muted);margin-top:6px">Only <b>you</b> can toggle. When ON, students must pass face scan via camera. Your camera is used for liveness — students' face snapshots appear below for your approval.</div>
-        <div style="margin-top:10px;display:flex;gap:8px">
-          <button class="btn btn-dark btn-sm" id="teacherCameraBtn" onclick="toggleTeacherCamera()"><i class="fa-solid fa-video"></i> <span id="teacherCamText">Start My Camera</span></button>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px">Only <b>you (teacher)</b> can toggle — students <b>do NOT</b> see a face scan camera. When ON, you will verify students <b>in person</b> using <b>your</b> camera/laptop. Face queue below shows snapshots you captured.</div>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-dark btn-sm" id="teacherCameraBtn" onclick="toggleTeacherCamera()"><i class="fa-solid fa-video"></i> <span id="teacherCamText">Start My Camera (for face check)</span></button>
           <span class="badge badge-primary" id="teacherCamStatus">Camera off</span>
+          <button class="btn btn-primary btn-sm" id="captureStudentFaceBtn" onclick="captureStudentFace()" style="display:none"><i class="fa-solid fa-camera-retro"></i> Capture Selected Student's Face</button>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <label for="faceStudentSelect" style="font-size:11px;font-weight:800;color:var(--muted)">Verify for:</label>
+          <select id="faceStudentSelect" class="select" style="min-width:180px;padding:6px 8px;font-size:12px">
+            <option value="">— Select pending student —</option>
+            {% for row in students_data %}{% if row.status != 'PRESENT' %}<option value="{{ row.student.id }}">{{ row.student.username }} • {{ row.enrollment.roll_number|default:row.student.roll_number|default:"" }}</option>{% endif %}{% endfor %}
+          </select>
+          <span style="font-size:11px;color:var(--muted)">Point your camera at student, then tap Capture.</span>
         </div>
         <div class="video-wrap" id="teacherCamWrap" style="display:none;margin-top:10px">
           <video id="teacherVideo" autoplay playsinline muted style="width:100%;height:220px;object-fit:cover;display:block"></video>
-          <div style="position:absolute;top:8px;left:8px;background:rgba(15,23,42,.8);color:white;padding:6px 10px;border-radius:999px;font-size:11px;font-weight:800"><i class="fa-solid fa-camera"></i> Teacher Camera • Face Scan Active</div>
+          <canvas id="teacherFaceCanvas" style="display:none"></canvas>
+          <div style="position:absolute;top:8px;left:8px;background:rgba(15,23,42,.8);color:white;padding:6px 10px;border-radius:999px;font-size:11px;font-weight:800"><i class="fa-solid fa-camera"></i> Teacher Camera — Face Scan</div>
           <div style="position:absolute;bottom:8px;left:8px;right:8px;background:rgba(255,255,255,.95);border-radius:10px;padding:8px 10px;font-size:11px;display:flex;gap:8px;align-items:center">
             <span class="status-dot pulse" style="background:#22c55e"></span> <span id="teacherFaceStatus">Waiting for face…</span>
-            <span style="margin-left:auto" class="badge badge-success"><i class="fa-solid fa-shield-halved"></i> Your camera verifies session</span>
+            <span style="margin-left:auto" class="badge badge-success"><i class="fa-solid fa-shield-halved"></i> Your camera</span>
           </div>
         </div>
+        <div id="faceCaptureMsg" style="margin-top:8px;font-size:12px"></div>
       </div>
 
       <div style="margin-top:12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:14px">
@@ -307,57 +318,103 @@ async function toggleFace(){
   }catch(e){}
 }
 
-// Teacher camera — uses TEACHER's camera per spec
+// Teacher camera — TEACHER ONLY per spec. Captures student face via teacher's camera.
 async function toggleTeacherCamera(){
-  const btn=document.getElementById('teacherCameraBtn'), wrap=document.getElementById('teacherCamWrap'), video=document.getElementById('teacherVideo'), status=document.getElementById('teacherCamStatus'), text=document.getElementById('teacherCamText');
+  const btn=document.getElementById('teacherCameraBtn'), wrap=document.getElementById('teacherCamWrap'), video=document.getElementById('teacherVideo'), status=document.getElementById('teacherCamStatus'), text=document.getElementById('teacherCamText'), capBtn=document.getElementById('captureStudentFaceBtn');
   if(teacherStream){
-    teacherStream.getTracks().forEach(t=>t.stop()); teacherStream=null; wrap.style.display='none'; status.textContent='Camera off'; status.className='badge badge-primary'; text.textContent='Start My Camera'; return;
+    teacherStream.getTracks().forEach(t=>t.stop()); teacherStream=null; wrap.style.display='none'; status.textContent='Camera off'; status.className='badge badge-primary'; text.textContent='Start My Camera (for face check)'; capBtn.style.display='none'; return;
   }
   try{
-    teacherStream=await navigator.mediaDevices.getUserMedia({video:true});
+    teacherStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'}});
     video.srcObject=teacherStream; await video.play();
-    wrap.style.display='block'; status.textContent='Camera on — Face scan active'; status.className='badge badge-success'; text.textContent='Stop Camera';
-    // simple face detection hint using FaceDetector if available
+    wrap.style.display='block'; status.textContent='Camera on — point at student'; status.className='badge badge-success'; text.textContent='Stop Camera'; capBtn.style.display='inline-flex';
     if('FaceDetector' in window){
       const detector=new FaceDetector({fastMode:true});
       const faceStatus=document.getElementById('teacherFaceStatus');
-      setInterval(async()=>{
+      const iv=setInterval(async()=>{
+        if(!teacherStream){ clearInterval(iv); return; }
         try{
           const faces=await detector.detect(video);
-          faceStatus.textContent=faces.length? `Face detected (${faces.length}) — you are verified` : 'No face — position yourself';
-          faceStatus.style.color=faces.length?'#059669':'#dc2626';
+          if(faces.length===1){ faceStatus.textContent=`Face detected ✓ — ready to capture`; faceStatus.style.color='#059669';}
+          else if(faces.length>1){ faceStatus.textContent=`Multiple faces (${faces.length}) — ensure one student`; faceStatus.style.color='#d97706';}
+          else { faceStatus.textContent='No face — position student in frame'; faceStatus.style.color='#dc2626';}
         }catch(e){}
-      }, 1000);
+      }, 900);
+      video._faceIv=iv;
     } else {
-      document.getElementById('teacherFaceStatus').textContent='Camera active — face verification enabled (teacher)';
+      document.getElementById('teacherFaceStatus').textContent='Camera active — point at student and capture';
     }
   }catch(e){
-    alert('Camera denied — allow camera to use face verification');
+    alert('Camera denied — allow camera to use face verification. Error: '+e.message);
   }
 }
 
-// Teacher location capture
+// Teacher captures student face via teacher's camera and links to selected student
+async function captureStudentFace(){
+  const sel=document.getElementById('faceStudentSelect');
+  const studentId=sel.value;
+  const msg=document.getElementById('faceCaptureMsg');
+  if(!studentId){ msg.innerHTML='<span style="color:#dc2626">Select a pending student first</span>'; return; }
+  if(!teacherStream){ msg.innerHTML='<span style="color:#dc2626">Start camera first</span>'; return; }
+  const v=document.getElementById('teacherVideo'), c=document.getElementById('teacherFaceCanvas');
+  c.width=v.videoWidth; c.height=v.videoHeight;
+  const ctx=c.getContext('2d'); ctx.drawImage(v,0,0,c.width,c.height);
+  const dataUrl=c.toDataURL('image/jpeg',0.75);
+  msg.innerHTML='<span style="color:#2563eb"><i class="fa-solid fa-spinner fa-spin"></i> Uploading face for '+sel.options[sel.selectedIndex].text+'…</span>';
+  try{
+    const res=await fetch(`/attendance/session/${sessionId}/teacher-verify-face/`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':'{{ csrf_token }}'}, body: JSON.stringify({student_id: studentId, face_image: dataUrl})});
+    const data=await res.json();
+    if(res.ok){
+      msg.innerHTML='<span style="color:#059669"><i class="fa-solid fa-circle-check"></i> Face captured & verified for '+data.student+' ✓ — will count at finalization</span>';
+      addFeed(`Face verified for ${data.student} by teacher`, 'manual');
+      // update face queue count immediately
+      pollStatus();
+      // optionally auto-mark present? If face ON, we still require QR+location, but teacher face now satisfies face check.
+    } else {
+      msg.innerHTML='<span style="color:#dc2626">'+(data.error||'Failed')+'</span>';
+    }
+  }catch(e){ msg.innerHTML='<span style="color:#dc2626">Network error</span>'; }
+}
+
+// Improved teacher location — best-of-3 for accuracy
+async function getBestPosTeacher(attempts=3, timeout=12000){
+  let best=null;
+  for(let i=0;i<attempts;i++){
+    try{
+      const p=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true, timeout, maximumAge:0}));
+      if(!best || p.coords.accuracy < best.coords.accuracy) best=p;
+      if(p.coords.accuracy < 12) break;
+      if(i<attempts-1) await new Promise(r=>setTimeout(r,600));
+    }catch(e){ if(e.code===1) throw e; if(i===attempts-1 && !best) throw e; await new Promise(r=>setTimeout(r,600)); }
+  }
+  return best;
+}
 async function captureTeacherLocation(){
   const badge=document.getElementById('locBadge'), tLat=document.getElementById('tLat'), tLng=document.getElementById('tLng'), topBadge=document.getElementById('teacherLocBadge');
   if(!navigator.geolocation){alert('Geolocation not supported');return}
-  badge.textContent='Capturing…';badge.className='badge badge-warning';
-  navigator.geolocation.getCurrentPosition(async pos=>{
-    const lat=pos.coords.latitude, lng=pos.coords.longitude;
-    try{
-      const res=await fetch(`/attendance/session/${sessionId}/teacher-location/`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':'{{ csrf_token }}'},body:JSON.stringify({latitude:lat,longitude:lng})});
-      const data=await res.json();
-      if(res.ok){
-        tLat.textContent=lat.toFixed(6); tLng.textContent=lng.toFixed(6);
-        badge.textContent='Set ✓';badge.className='badge badge-success';
-        topBadge.innerHTML='<i class="fa-solid fa-location-crosshairs"></i> Teacher located';
-        topBadge.className='badge badge-success';
-        addFeed(`Teacher location updated: ${lat.toFixed(4)}, ${lng.toFixed(4)}`, 'manual');
-      } else alert(data.error);
-    }catch(e){alert('Failed to update location')}
-  }, err=>{
-    let m='Denied'; if(err.code===1) m='Permission denied — enable location';
+  badge.textContent='Capturing (best of 3, ~3s)…';badge.className='badge badge-warning';
+  try{
+    const pos=await getBestPosTeacher(3, 12000);
+    const lat=pos.coords.latitude, lng=pos.coords.longitude, acc=Math.round(pos.coords.accuracy);
+    // Show accuracy in UI
+    const res=await fetch(`/attendance/session/${sessionId}/teacher-location/`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':'{{ csrf_token }}'},body:JSON.stringify({latitude:lat, longitude:lng, accuracy: acc})});
+    const data=await res.json();
+    if(res.ok){
+      tLat.textContent=lat.toFixed(6) + ` (±${acc}m)`; tLng.textContent=lng.toFixed(6);
+      badge.textContent=`Set ✓ (±${acc}m)`;badge.className= acc>30 ? 'badge badge-warning' : 'badge badge-success';
+      topBadge.innerHTML='<i class="fa-solid fa-location-crosshairs"></i> Teacher located (±'+acc+'m)';
+      topBadge.className= acc>30 ? 'badge badge-warning' : 'badge badge-success';
+      addFeed(`Teacher location updated: ${lat.toFixed(5)}, ${lng.toFixed(5)} ±${acc}m`, 'manual');
+      if(acc>30){
+        alert(`Warning: Your location accuracy is ±${acc}m (poor). Distance to students will be off by ~${acc}m. Move near window/outdoors, enable High Accuracy in phone settings, and retry. Sitting 0m away showing 21m is expected with ±20m accuracy.`);
+      }
+    } else alert(data.error);
+  }catch(err){
+    let m='Failed'; if(err.code===1) m='Permission denied — enable location in browser & OS settings';
+    else if(err.code===2) m='Location unavailable — check GPS';
+    else if(err.code===3) m='Timeout — try near window';
     badge.textContent=m;badge.className='badge badge-danger'; alert(m);
-  }, {enableHighAccuracy:true, timeout:10000});
+  }
 }
 
 // Countdown

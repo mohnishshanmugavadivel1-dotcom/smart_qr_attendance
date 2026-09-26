@@ -27,6 +27,7 @@ class AttendanceSession(models.Model):
     teacher_latitude = models.FloatField(null=True, blank=True, help_text="Teacher lat at session start")
     teacher_longitude = models.FloatField(null=True, blank=True, help_text="Teacher lng at session start")
     teacher_location_updated_at = models.DateTimeField(null=True, blank=True)
+    teacher_location_accuracy = models.FloatField(null=True, blank=True, help_text="Accuracy in meters at last update")
     # Teacher can toggle face verification on/off anytime
     face_verification_enabled = models.BooleanField(default=False, help_text="If True, students must pass face scan")
     # Radius in meters (default 50)
@@ -89,10 +90,12 @@ class AttendanceAttempt(models.Model):
     # === NEW: Location & Face per attempt ===
     student_latitude = models.FloatField(null=True, blank=True)
     student_longitude = models.FloatField(null=True, blank=True)
+    student_location_accuracy = models.FloatField(null=True, blank=True, help_text="GPS accuracy in meters")
     distance_meters = models.FloatField(null=True, blank=True, help_text="Distance from teacher at verification")
     location_verified = models.BooleanField(default=False)
     face_verified = models.BooleanField(default=False)
-    face_image = models.TextField(null=True, blank=True, help_text="Base64 face snapshot (optional)")
+    face_verified_by_teacher = models.BooleanField(default=False, help_text="True if teacher captured face via teacher camera")
+    face_image = models.TextField(null=True, blank=True, help_text="Base64 face snapshot (teacher camera or student)")
 
     class Meta:
         unique_together = ('student', 'session', 'attempt_number')

@@ -15,11 +15,10 @@
 {% block content %}
 <div style="max-width:740px;margin:0 auto">
   <div style="display:flex;gap:8px;margin-bottom:16px">
-    <div class="step" id="step1"><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:800">Step 1</div><b style="font-size:13px">Prep</b><div style="font-size:11px;opacity:.7">10s</div></div>
+    <div class="step" id="step1"><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:800">Step 1</div><b style="font-size:13px"><i class="fa-solid fa-location-dot"></i> Location</b><div style="font-size:11px;opacity:.7">{{ session.allowed_radius_meters|default:"50" }}m geofence</div></div>
     <div class="step" id="step2"><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:800">Step 2</div><b style="font-size:13px">Scan</b><div style="font-size:11px;opacity:.7">QR</div></div>
-    <div class="step" id="stepFace" style="{% if not session or not session.face_verification_enabled %}display:none{% endif %}"><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:800">Step 2b</div><b style="font-size:13px"><i class="fa-solid fa-camera"></i> Face</b><div style="font-size:11px;opacity:.7">Teacher cam</div></div>
     <div class="step" id="step3"><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:800">Step 3</div><b style="font-size:13px">Verify</b><div style="font-size:11px;opacity:.7">10s</div></div>
-    <div class="step" id="step4"><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:800">Step 4</div><b style="font-size:13px">PRESENT</b><div style="font-size:11px;opacity:.7"><i class="fa-solid fa-location-dot"></i> 50m</div></div>
+    <div class="step" id="step4"><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:800">Step 4</div><b style="font-size:13px">PRESENT</b><div style="font-size:11px;opacity:.7"><i class="fa-solid fa-check"></i> Done</div></div>
   </div>
 
   <div class="card card-pad" id="mainCard">
@@ -32,7 +31,7 @@
           <div style="font-weight:800"><i class="fa-solid fa-keyboard"></i> Enter token manually</div>
           <div style="display:flex;gap:8px;margin-top:10px;max-width:420px;margin:0 auto">
             <input id="manualToken" class="input" placeholder="Paste session token or full QR link">
-            <button class="btn btn-primary" onclick="goManual()">Go</button>
+            <button type="button" class="btn btn-primary" onclick="goManual()">Go</button>
           </div>
         </div>
       </div>
@@ -47,13 +46,13 @@
         <div style="width:80px;height:80px;border-radius:20px;background:#ecfdf5;color:#10b981;display:grid;place-items:center;margin:0 auto 12px;font-size:32px"><i class="fa-solid fa-circle-check"></i></div>
         <h2 style="font-family:Space Grotesk,sans-serif;font-size:26px">You're already PRESENT 🎉</h2>
         <p style="color:var(--muted);margin-top:6px">{{ session.classroom.code }} • {{ session.subject.name }}</p>
-        <div style="margin-top:14px" class="badge badge-success">Face + 50m verified</div>
+        <div style="margin-top:14px" class="badge badge-success">Location verified ✓</div>
       </div>
     {% else %}
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
         <div>
           <h2 style="font-family:Space Grotesk,sans-serif">Verify Attendance</h2>
-          <div style="font-size:13px;color:var(--muted)"><b style="color:var(--dark)">{{ session.classroom.code }}</b> • {{ session.subject.name }} • by {{ session.teacher.username }} • <span class="badge {% if session.face_verification_enabled %}badge-dark{% else %}badge-primary{% endif %}"><i class="fa-solid fa-camera"></i> Face {% if session.face_verification_enabled %}ON{% else %}OFF{% endif %}</span> • <span class="badge badge-success"><i class="fa-solid fa-location-dot"></i> {{ session.allowed_radius_meters }}m</span></div>
+          <div style="font-size:13px;color:var(--muted)"><b style="color:var(--dark)">{{ session.classroom.code }}</b> • {{ session.subject.name }} • by {{ session.teacher.username }} • {% if session.face_verification_enabled %}<span class="badge badge-dark"><i class="fa-solid fa-camera"></i> Face ON — teacher will verify you in person</span>{% else %}<span class="badge badge-primary"><i class="fa-solid fa-camera"></i> Face OFF</span>{% endif %} • <span class="badge badge-success"><i class="fa-solid fa-location-dot"></i> {{ session.allowed_radius_meters }}m</span></div>
         </div>
         <span class="badge {% if is_active %}badge-success{% else %}badge-warning{% endif %}" id="sessionStatus">{% if is_active %}OPEN{% elif is_expired %}EXPIRED{% else %}{{ session.status }}{% endif %}</span>
       </div>
@@ -62,84 +61,52 @@
         <div style="flex:1;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:10px 12px">
           <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:800;color:#1e40af"><i class="fa-solid fa-location-crosshairs"></i> Your Location — Mandatory</div>
           <div style="font-size:12px;margin-top:4px"><b>Lat:</b> <span id="sLat">—</span> <b style="margin-left:8px">Lng:</b> <span id="sLng">—</span> <span id="locAcc" style="color:var(--muted)"></span></div>
-          <div style="font-size:11px;color:#1e40af;margin-top:4px" id="distanceInfo">We check you are within <b>{{ session.allowed_radius_meters }}m</b> of teacher's laptop. <span id="teacherLocHint">{% if session.teacher_latitude %}Teacher located ✓{% else %}<span style="color:#dc2626">Teacher location not set yet — ask teacher to tap “Capture My Location”</span>{% endif %}</span></div>
+          <div style="font-size:11px;color:#1e40af;margin-top:4px" id="distanceInfo">We check you are within <b>{{ session.allowed_radius_meters }}m</b> of teacher's laptop. <span id="teacherLocHint">{% if session.teacher_latitude %}Teacher located ✓ (accuracy tracked){% else %}<span style="color:#dc2626">Teacher location not set yet — ask teacher to tap “Capture My Location”</span>{% endif %}</span></div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px" id="locDebug">Tip: Sitting next to laptop can still show 10–25m due to GPS/WiFi error. We retry for best accuracy. If you see &gt;30m accuracy, go near window/outdoors and retry.</div>
         </div>
-        <div style="width:200px;background:#f8fafc;border:1px solid var(--border);border-radius:12px;padding:10px 12px;text-align:center">
+        <div style="width:220px;background:#f8fafc;border:1px solid var(--border);border-radius:12px;padding:10px 12px;text-align:center">
           <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:800;color:var(--muted)">Distance to Teacher</div>
           <div style="font-family:Space Grotesk,sans-serif;font-size:22px;font-weight:800" id="distanceVal">—</div>
           <div style="font-size:11px" id="distanceBadge"><span class="badge badge-primary">Waiting for location</span></div>
+          <div style="font-size:10px;color:var(--muted);margin-top:4px" id="accInfo"></div>
         </div>
       </div>
 
       <div style="margin-top:12px;background:#0f172a;color:white;border-radius:14px;padding:12px;display:flex;gap:10px;align-items:center">
         <div style="width:36px;height:36px;border-radius:10px;background:rgba(255,255,255,.12);display:grid;place-items:center"><i class="fa-solid fa-fingerprint"></i></div>
         <div style="flex:1"><div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;opacity:.7;font-weight:800">Authenticated</div><div style="font-weight:800">{{ user.username }} • {{ user.roll_number|default:"" }}</div></div>
-        <span class="badge" style="background:rgba(255,255,255,.12)">Teacher face toggle controls you</span>
+        {% if session.face_verification_enabled %}<span class="badge" style="background:#fde68a;color:#92400e"><i class="fa-solid fa-camera"></i> Teacher face check pending</span>{% else %}<span class="badge" style="background:rgba(255,255,255,.12)">No face needed</span>{% endif %}
       </div>
 
-      <!-- IDLE -->
+      <!-- IDLE — No prep gap, direct to scan -->
       <div id="idleState" style="margin-top:18px">
         <div class="scan-box" id="idleBox">
-          <div style="font-weight:800"><i class="fa-solid fa-bolt"></i> Ready? We'll check location first.</div>
+          <div style="font-weight:800"><i class="fa-solid fa-bolt"></i> Ready? Enable location and scan immediately.</div>
           <div style="font-size:13px;color:var(--muted);margin-top:4px">Location is <b>mandatory</b> — you cannot be marked PRESENT without it. If you deny, screen freezes & teacher is notified.</div>
-          <button class="btn btn-primary" style="margin-top:14px;padding:14px 22px;font-size:15px" id="startBtn"><i class="fa-solid fa-location-dot"></i> Enable Location & Start (10s prep)</button>
-          <div style="font-size:11px;color:var(--muted);margin-top:8px"><i class="fa-solid fa-shield-halved"></i> Teacher camera: <b>{% if session.face_verification_enabled %}ON — you will do face scan after QR{% else %}OFF — no face needed{% endif %}</b> (teacher toggles)</div>
-        </div>
-      </div>
-
-      <div id="prepState" style="display:none;margin-top:18px;text-align:center">
-        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:16px;padding:18px">
-          <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--primary);font-weight:800">Preparation • Stay on page</div>
-          <div class="timer" id="prepTimer">10</div>
-          <div style="font-size:13px;color:#1e40af">Heartbeat active • Get ready to scan QR</div>
-          <div class="progress" style="margin-top:12px"><span id="prepProgress" style="width:100%"></span></div>
+          <button type="button" class="btn btn-primary" style="margin-top:14px;padding:14px 22px;font-size:15px" id="startBtn"><i class="fa-solid fa-location-dot"></i> Enable Location & Start Scanning</button>
+          <div style="font-size:11px;color:var(--muted);margin-top:8px">{% if session.face_verification_enabled %}<i class="fa-solid fa-camera" style="color:#d97706"></i> <b style="color:#92400e">Face ON</b> — teacher will verify your face <b>in person</b> on their device after you scan. You do <b>not</b> need to do a face scan here.{% else %}<i class="fa-solid fa-shield-halved"></i> Face OFF — no teacher verification needed.{% endif %}</div>
         </div>
       </div>
 
       <div id="scanState" style="display:none;margin-top:18px">
         <div style="background:#f0fdf4;border:1px solid #a7f3d0;border-radius:16px;padding:16px">
           <div style="display:flex;justify-content:space-between;align-items:center">
-            <b style="color:#065f46"><i class="fa-solid fa-qrcode"></i> Scan QR now</b>
+            <b style="color:#065f46"><i class="fa-solid fa-qrcode"></i> Scan QR now — no waiting</b>
             <span class="badge badge-success"><span class="status-dot pulse" style="background:#10b981"></span> Camera ready</span>
           </div>
           <div class="video-wrap" style="margin-top:12px">
             <video id="video" autoplay playsinline style="width:100%;height:320px;object-fit:cover;display:block"></video>
             <canvas id="canvas" style="display:none"></canvas>
             <div style="position:absolute;bottom:10px;left:10px;right:10px;display:flex;gap:8px">
-              <button class="btn btn-ghost btn-sm" style="background:rgba(255,255,255,.9)" onclick="stopCamera()"><i class="fa-solid fa-stop"></i> Stop</button>
-              <button class="btn btn-dark btn-sm" style="flex:1" onclick="startCamera()"><i class="fa-solid fa-camera"></i> Restart</button>
+              <button type="button" class="btn btn-ghost btn-sm" style="background:rgba(255,255,255,.9)" onclick="stopCamera()"><i class="fa-solid fa-stop"></i> Stop</button>
+              <button type="button" class="btn btn-dark btn-sm" style="flex:1" onclick="startCamera()"><i class="fa-solid fa-camera"></i> Restart</button>
             </div>
           </div>
           <div style="margin-top:12px;display:flex;gap:8px">
             <input id="tokenInput" class="input" placeholder="Or paste token / QR link" value="{{ token|default:'' }}">
-            <button class="btn btn-primary" id="scanBtn"><i class="fa-solid fa-bolt"></i> Verify Scan</button>
+            <button type="button" class="btn btn-primary" id="scanBtn"><i class="fa-solid fa-bolt"></i> Verify Scan</button>
           </div>
           <div id="scanMsg" style="margin-top:8px;font-size:13px"></div>
-        </div>
-      </div>
-
-      <!-- FACE STATE (only if face enabled) -->
-      <div id="faceState" style="display:none;margin-top:18px">
-        <div style="background:linear-gradient(135deg,#fef3c7,#fffbeb);border:1px solid #fde68a;border-radius:16px;padding:16px">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <b style="color:#92400e"><i class="fa-solid fa-camera"></i> Face Verification — via Teacher's Camera Policy</b>
-            <span class="badge badge-warning"><i class="fa-solid fa-eye"></i> Teacher will see your snapshot</span>
-          </div>
-          <div style="font-size:12px;color:#92400e;margin-top:6px">Teacher has enabled face scan. Show your face clearly — we detect a face via your camera (teacher's camera policy). This uses your device camera but is controlled by teacher's toggle.</div>
-          <div class="video-wrap" style="margin-top:12px">
-            <video id="faceVideo" autoplay playsinline muted style="width:100%;height:320px;object-fit:cover;display:block"></video>
-            <canvas id="faceCanvas" style="display:none"></canvas>
-            <div style="position:absolute;top:10px;left:10px;background:rgba(15,23,42,.8);color:white;padding:6px 10px;border-radius:999px;font-size:11px;font-weight:800"><i class="fa-solid fa-camera"></i> Face Scan</div>
-            <div style="position:absolute;bottom:10px;left:10px;right:10px;display:flex;gap:8px">
-              <button class="btn btn-ghost btn-sm" style="background:rgba(255,255,255,.9)" onclick="stopFaceCamera()"><i class="fa-solid fa-stop"></i> Stop</button>
-              <button class="btn btn-primary btn-sm" style="flex:1" onclick="captureFace()"><i class="fa-solid fa-camera-retro"></i> Capture & Verify Face</button>
-            </div>
-          </div>
-          <div id="faceMsg" style="margin-top:8px;font-size:13px"></div>
-          <div style="margin-top:10px;display:flex;gap:8px">
-            <button class="btn btn-dark btn-sm" id="faceContinueBtn" style="display:none;flex:1" onclick="startVerify()"><i class="fa-solid fa-arrow-right"></i> Face OK — Continue to 10s Verification</button>
-          </div>
-          <div style="font-size:11px;color:var(--muted);margin-top:8px">If teacher turns face OFF mid-session, you skip this and go directly to verification.</div>
         </div>
       </div>
 
@@ -147,7 +114,7 @@
         <div style="background:linear-gradient(135deg,#ecfdf5,#f0fdfa);border:1px solid #a7f3d0;border-radius:16px;padding:18px">
           <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#059669;font-weight:800">Post-Scan Verification</div>
           <div class="timer" id="verifyTimer" style="color:#059669">10</div>
-          <div style="font-size:13px;color:#065f46">Don't leave — location & face already checked</div>
+          <div style="font-size:13px;color:#065f46" id="verifySub">Don't leave — location checked, face is teacher-side</div>
           <div class="progress" style="margin-top:12px"><span id="verifyProgress" style="width:100%;background:#10b981"></span></div>
           <div id="verifyMsg" style="margin-top:10px;font-size:13px;color:#065f46"></div>
           <div style="margin-top:8px" id="verifyLocationBadge"><span class="badge badge-success"><i class="fa-solid fa-location-dot"></i> Within 50m ✓</span></div>
@@ -159,7 +126,7 @@
           <div style="width:80px;height:80px;border-radius:20px;background:#22c55e;color:white;display:grid;place-items:center;margin:0 auto;font-size:32px"><i class="fa-solid fa-check"></i></div>
           <h2 style="font-family:Space Grotesk,sans-serif;font-size:28px;margin-top:14px">Attendance Confirmed!</h2>
           <p style="opacity:.8;margin-top:6px">{{ session.classroom.code }} • {{ session.subject.name }} • <span id="successDistance"></span></p>
-          <div style="margin-top:16px;display:inline-flex;gap:8px;align-items:center;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);border-radius:999px;padding:10px 16px"><span class="badge badge-success">PRESENT</span> <span>50m & Face ✓</span> <span id="successTime"></span></div>
+          <div style="margin-top:16px;display:inline-flex;gap:8px;align-items:center;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);border-radius:999px;padding:10px 16px"><span class="badge badge-success">PRESENT</span> <span>Location ✓</span> <span id="successTime"></span></div>
           <div style="margin-top:16px;display:flex;gap:10px;justify-content:center">
             <a href="{% url 'attendance:student_dashboard' %}" class="btn btn-ghost" style="background:white;color:var(--dark)">Dashboard</a>
             <a href="{% url 'attendance:student_history' %}" class="btn" style="background:rgba(255,255,255,.12);color:white">History</a>
@@ -173,7 +140,7 @@
           <div style="width:64px;height:64px;border-radius:16px;background:#ef4444;color:white;display:grid;place-items:center;margin:0 auto;font-size:22px"><i class="fa-solid fa-triangle-exclamation"></i></div>
           <h3 style="margin-top:10px;color:#991b1b" id="invalidTitle">Attempt Invalidated</h3>
           <p style="font-size:13px;color:#991b1b;margin-top:6px" id="invalidMsg">—</p>
-          <button class="btn btn-primary" style="margin-top:14px" onclick="retry()"><i class="fa-solid fa-rotate"></i> Retry</button>
+          <button type="button" class="btn btn-primary" style="margin-top:14px" onclick="retry()"><i class="fa-solid fa-rotate"></i> Retry</button>
         </div>
       </div>
 
@@ -184,9 +151,9 @@
             <div style="width:80px;height:80px;border-radius:20px;background:#fef2f2;color:#ef4444;display:grid;place-items:center;margin:0 auto;font-size:32px"><i class="fa-solid fa-location-dot"></i></div>
             <h2 style="font-family:Space Grotesk,sans-serif;margin-top:14px;color:#991b1b">📍 Location Required — Frozen</h2>
             <p style="font-size:13px;color:var(--muted);margin-top:8px;line-height:1.6">You denied location or disabled it. Per policy, you <b>cannot be marked PRESENT</b> and this screen is <b>frozen</b> until you enable location. Your name/roll has been sent to the teacher.</p>
-            <div style="margin-top:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:10px 12px;font-size:12px;color:#92400e"><i class="fa-solid fa-triangle-exclamation"></i> “who doesnt allow location, should not be able to mark their attendence present and those whose attendence is turned off, at the end like once the attendence is over, they should get a message that freezes there until the location is enabled” — Frozen until enabled.</div>
+            <div style="margin-top:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:10px 12px;font-size:12px;color:#92400e"><i class="fa-solid fa-triangle-exclamation"></i> Frozen until location is enabled — grant permission and retry.</div>
             <div style="margin-top:14px;display:flex;gap:10px">
-              <button class="btn btn-primary" style="flex:1;padding:14px" onclick="retryLocation()"><i class="fa-solid fa-location-crosshairs"></i> Enable Location & Retry</button>
+              <button type="button" class="btn btn-primary" style="flex:1;padding:14px" onclick="retryLocation()"><i class="fa-solid fa-location-crosshairs"></i> Enable Location & Retry</button>
             </div>
             <div style="margin-top:10px;font-size:11px;color:var(--muted)">Grant location permission in browser prompt → we re-check 50m geofence.</div>
             <div style="margin-top:12px;display:flex;gap:8px;justify-content:center">
@@ -198,9 +165,9 @@
 
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
         <span class="badge badge-dark"><i class="fa-solid fa-heart-pulse"></i> Heartbeat <span id="hbDot" class="status-dot pulse" style="background:#22c55e"></span> <span id="hbStatus">idle</span></span>
-        <span class="badge badge-primary"><i class="fa-solid fa-location-dot"></i> 50m mandatory</span>
+        <span class="badge badge-primary"><i class="fa-solid fa-location-dot"></i> {{ session.allowed_radius_meters }}m mandatory</span>
         <span class="badge" style="background:#f1f5f9;border:1px solid var(--border)">Attempt: <span id="attemptId">—</span></span>
-        <span class="badge {% if session.face_verification_enabled %}badge-dark{% else %}badge-primary{% endif %}" id="faceRequiredBadge"><i class="fa-solid fa-camera"></i> Face {% if session.face_verification_enabled %}Required{% else %}Off{% endif %}</span>
+        <span class="badge {% if session.face_verification_enabled %}badge-dark{% else %}badge-primary{% endif %}" id="faceRequiredBadge"><i class="fa-solid fa-camera"></i> Face {% if session.face_verification_enabled %}Teacher-side{% else %}Off{% endif %}</span>
       </div>
     {% endif %}
   </div>
@@ -218,16 +185,15 @@ const teacherLngInitial = {% if session.teacher_longitude %}{{ session.teacher_l
 let teacherLat = teacherLatInitial, teacherLng = teacherLngInitial;
 let attemptId = {{ open_attempt.id|default:"null" }};
 let studentLat=null, studentLng=null, studentAcc=null, distanceM=null;
-let heartbeatTimer=null, prepTimer=null, verifyTimer=null;
-let prepLeft=10, verifyLeft=10, scanVerified=false, faceVerified=!faceRequiredInitial;
+let heartbeatTimer=null, verifyTimer=null;
+let verifyLeft=10, scanVerified=false;
 let state='idle';
 
-function setStep(n, withFace){
-  const showFace = withFace !== undefined ? withFace : (document.getElementById('stepFace').style.display!=='none');
+function setStep(n){
   document.querySelectorAll('.step').forEach(el=>el.classList.remove('active','done'));
-  // mapping: 1 prep, 2 scan, 2b face, 3 verify, 4 success
-  const order = showFace ? ['step1','step2','stepFace','step3','step4'] : ['step1','step2','step3','step4'];
-  const idx = order.indexOf(n);
+  const order = ['step1','step2','step3','step4'];
+  const map = {idle:'step1', scan:'step2', verify:'step3', success:'step4'};
+  const idx = order.indexOf(map[n] || n);
   order.forEach((id,i)=>{
     const el=document.getElementById(id);
     if(!el) return;
@@ -237,15 +203,14 @@ function setStep(n, withFace){
 }
 function showState(s){
   state=s;
-  ['idle','prep','scan','face','verify','success','invalid'].forEach(k=>{
+  ['idle','scan','verify','success','invalid'].forEach(k=>{
     const el=document.getElementById(k+'State');
     if(el) el.style.display=(k===s?'block':'none');
   });
-  if(s==='prep') setStep('step1');
-  else if(s==='scan') setStep('step2');
-  else if(s==='face') setStep('stepFace');
-  else if(s==='verify') setStep('step3');
-  else if(s==='success') setStep('step4');
+  if(s==='idle') setStep('idle');
+  else if(s==='scan') setStep('scan');
+  else if(s==='verify') setStep('verify');
+  else if(s==='success') setStep('success');
 }
 function updateHb(s){document.getElementById('hbStatus').textContent=s;document.getElementById('attemptId').textContent=attemptId||'—';}
 function haversine(lat1, lon1, lat2, lon2){
@@ -255,67 +220,97 @@ function haversine(lat1, lon1, lat2, lon2){
   return R*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 function updateDistanceUI(){
-  const el=document.getElementById('distanceVal'), badge=document.getElementById('distanceBadge');
+  const el=document.getElementById('distanceVal'), badge=document.getElementById('distanceBadge'), acc=document.getElementById('accInfo');
   if(distanceM===null || studentLat===null){
-    el.textContent='—'; badge.innerHTML='<span class="badge badge-primary">Waiting</span>'; return;
+    el.textContent='—'; badge.innerHTML='<span class="badge badge-primary">Waiting</span>'; 
+    if(studentAcc) acc.textContent='Accuracy ±'+Math.round(studentAcc)+'m';
+    return;
   }
   el.textContent=Math.round(distanceM)+'m';
   const inRange = distanceM <= allowedRadius;
   badge.innerHTML = inRange ? '<span class="badge badge-success"><i class="fa-solid fa-check"></i> Within '+allowedRadius+'m</span>' : '<span class="badge badge-danger"><i class="fa-solid fa-triangle-exclamation"></i> '+(Math.round(distanceM-allowedRadius))+'m outside</span>';
+  if(studentAcc!==null){
+    acc.textContent='Your accuracy ±'+Math.round(studentAcc)+'m' + (studentAcc>30?' • Poor — try near window':' • Good');
+    if(studentAcc>30) acc.style.color='#d97706'; else acc.style.color='#059669';
+  }
+  // warn about combined error
+  if(studentAcc && studentAcc>25){
+    document.getElementById('locDebug').innerHTML='⚠️ Your GPS accuracy is ±'+Math.round(studentAcc)+'m — distance can be off by ~'+Math.round(studentAcc)+'m. For best result: enable <b>High accuracy</b> in phone location settings, go near window, wait 5s, then retry. Sitting 0m away can still show 15–25m.';
+    document.getElementById('locDebug').style.color='#d97706';
+  }
+}
+
+// Improved location: try 3 times, pick best accuracy (lowest)
+async function getBestPosition(attempts=3, timeout=12000){
+  let best=null;
+  for(let i=0;i<attempts;i++){
+    try{
+      const pos = await new Promise((resolve, reject)=>{
+        if(!navigator.geolocation) return reject({code:0, message:'Geolocation not supported', BEST: best});
+        navigator.geolocation.getCurrentPosition(resolve, reject, {enableHighAccuracy:true, timeout: timeout, maximumAge:0});
+      });
+      const acc = pos.coords.accuracy;
+      // console log for debug
+      console.log(`Location attempt ${i+1}:`, pos.coords.latitude, pos.coords.longitude, '±'+Math.round(acc)+'m');
+      if(!best || acc < best.coords.accuracy) best=pos;
+      // if we got excellent accuracy, stop early
+      if(acc < 12) break;
+      // wait 600ms between attempts for GPS to stabilize
+      if(i<attempts-1) await new Promise(r=>setTimeout(r, 700));
+    }catch(e){
+      if(e.code===1){ // permission denied
+        throw e;
+      }
+      // try next attempt on timeout/unavailable
+      console.log('Location attempt failed', i+1, e);
+      if(i===attempts-1 && !best) throw e;
+      await new Promise(r=>setTimeout(r, 700));
+    }
+  }
+  return best;
 }
 
 async function captureLocation(){
-  return new Promise((resolve, reject)=>{
-    if(!navigator.geolocation) return reject({code:0, message:'Geolocation not supported'});
-    navigator.geolocation.getCurrentPosition(pos=>{
-      studentLat=pos.coords.latitude; studentLng=pos.coords.longitude; studentAcc=pos.coords.accuracy;
-      document.getElementById('sLat').textContent=studentLat.toFixed(6);
-      document.getElementById('sLng').textContent=studentLng.toFixed(6);
-      document.getElementById('locAcc').textContent=` (±${Math.round(studentAcc)}m)`;
-      if(teacherLat!==null && teacherLng!==null){
-        distanceM=haversine(studentLat, studentLng, teacherLat, teacherLng);
-        updateDistanceUI();
-      } else {
-        document.getElementById('distanceVal').textContent='Teacher not set';
-        document.getElementById('distanceBadge').innerHTML='<span class="badge badge-warning">Teacher location missing</span>';
-      }
-      resolve({lat:studentLat,lng:studentLng,acc:studentAcc,dist:distanceM});
-    }, err=>{
-      reject(err);
-    }, {enableHighAccuracy:true, timeout:10000, maximumAge:0});
-  });
+  const pos = await getBestPosition(3, 12000);
+  studentLat=pos.coords.latitude; studentLng=pos.coords.longitude; studentAcc=pos.coords.accuracy;
+  document.getElementById('sLat').textContent=studentLat.toFixed(6);
+  document.getElementById('sLng').textContent=studentLng.toFixed(6);
+  document.getElementById('locAcc').textContent=` (±${Math.round(studentAcc)}m)`;
+  if(teacherLat!==null && teacherLng!==null){
+    distanceM=haversine(studentLat, studentLng, teacherLat, teacherLng);
+    updateDistanceUI();
+  } else {
+    document.getElementById('distanceVal').textContent='Teacher not set';
+    document.getElementById('distanceBadge').innerHTML='<span class="badge badge-warning">Teacher location missing</span>';
+  }
+  return {lat:studentLat,lng:studentLng,acc:studentAcc,dist:distanceM};
 }
 
 function showFrozen(reason){
   document.getElementById('frozenOverlay').style.display='flex';
-  // log to teacher
   fetch('/attendance/api/location-denied/',{
     method:'POST',
     headers:{'Content-Type':'application/json','X-CSRFToken':'{{ csrf_token }}'},
     body: JSON.stringify({token: sessionToken, reason: reason || 'denied'})
   }).catch(()=>{});
-  // disable start
   const btn=document.getElementById('startBtn');
   if(btn){btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-ban"></i> Location Frozen — Enable to Continue';}
 }
 function hideFrozen(){
   document.getElementById('frozenOverlay').style.display='none';
   const btn=document.getElementById('startBtn');
-  if(btn){btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-location-dot"></i> Enable Location & Start (10s prep)';}
+  if(btn){btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-location-dot"></i> Enable Location & Start Scanning';}
 }
 async function retryLocation(){
   try{
     await captureLocation();
     hideFrozen();
-    // remove denial on server? Actually next startAttempt will delete denial, but we also can keep. Hide.
-    // Poll teacher location again
-    const res=await fetch(`/attendance/session/${sessionToken ? '' : ''}`) // dummy
   }catch(e){
     showFrozen(e.code===1?'denied': e.message || 'unavailable');
   }
 }
 
-// Face — check if face still required (teacher may have toggled)
+// Face — check if face still required (teacher may have toggled) — just update badge, no scan here
 async function checkFaceToggle(){
   try{
     const res=await fetch(`/attendance/session/{{ session.id }}/status/`);
@@ -324,19 +319,17 @@ async function checkFaceToggle(){
       const enabled=data.face_enabled;
       teacherLat=data.teacher_lat; teacherLng=data.teacher_lng;
       if(enabled !== undefined){
-        faceVerified = !enabled; // if disabled, no need
         const badge=document.getElementById('faceRequiredBadge');
-        badge.innerHTML='<i class="fa-solid fa-camera"></i> Face '+(enabled?'Required':'Off');
+        badge.innerHTML='<i class="fa-solid fa-camera"></i> Face '+(enabled?'Teacher-side':'Off');
         badge.className='badge '+(enabled?'badge-dark':'badge-primary');
-        document.getElementById('stepFace').style.display=enabled?'block':'none';
-        if(!enabled && state==='face'){
-          // skip face
-          faceVerified=true;
-          startVerify();
-        }
+        // update header badge too
+        const sub=document.getElementById('verifySub');
+        if(sub) sub.textContent = enabled ? 'Teacher will verify your face in person after location check' : 'Location checked — no face needed';
       }
-      if(teacherLat!==null) updateDistanceUI();
-      if(!enabled) faceVerified=true;
+      if(teacherLat!==null && studentLat!==null) {
+        distanceM=haversine(studentLat, studentLng, teacherLat, teacherLng);
+        updateDistanceUI();
+      }
       return enabled;
     }
   }catch(e){}
@@ -344,29 +337,30 @@ async function checkFaceToggle(){
 }
 
 async function startAttempt(){
-  // must have location
+  // must have location — use best-of-3
   try{
     if(studentLat===null){
       await captureLocation();
+    } else {
+      // refresh for best accuracy right before start
+      try{ await captureLocation(); }catch(e){}
     }
   }catch(e){
     let reason='denied';
     if(e.code===1) reason='denied'; else if(e.code===2) reason='unavailable'; else if(e.code===3) reason='timeout'; else reason='disabled';
     showFrozen(reason);
-    // reset button
     const btn=document.getElementById('startBtn');
-    btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-location-dot"></i> Enable Location & Start (10s prep)';
+    btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-location-dot"></i> Enable Location & Start Scanning';
     throw e;
   }
   if(teacherLat===null){
     alert("Teacher location not set yet. Ask teacher to tap 'Capture My Location' on their session page.");
     document.getElementById('startBtn').disabled=false;
-    document.getElementById('startBtn').innerHTML='<i class="fa-solid fa-location-dot"></i> Enable Location & Start (10s prep)';
+    document.getElementById('startBtn').innerHTML='<i class="fa-solid fa-location-dot"></i> Enable Location & Start Scanning';
     return;
   }
   distanceM=haversine(studentLat, studentLng, teacherLat, teacherLng);
   updateDistanceUI();
-  // Now call API with location
   const res=await fetch('/attendance/api/attempt/start/',{
     method:'POST',
     headers:{'Content-Type':'application/json','X-CSRFToken':'{{ csrf_token }}'},
@@ -376,7 +370,9 @@ async function startAttempt(){
   if(res.ok){
     attemptId=data.attempt_id;
     distanceM=data.distance; updateDistanceUI();
-    updateHb('OPEN'); startHeartbeat(); startPrep();
+    updateHb('OPEN'); startHeartbeat(); 
+    // NO prep gap — go directly to scan
+    showState('scan'); startCamera(); setStep('scan');
     hideFrozen();
   } else {
     if(data.location_required){
@@ -384,11 +380,11 @@ async function startAttempt(){
     } else if(data.teacher_location_missing){
       alert(data.error);
     } else if(data.already_open && data.attempt_id){
-      attemptId=data.attempt_id; updateHb('OPEN (resumed)'); startHeartbeat(); startPrep();
+      attemptId=data.attempt_id; updateHb('OPEN (resumed)'); startHeartbeat(); showState('scan'); startCamera();
     } else {
       alert(data.error||'Failed to start');
       document.getElementById('startBtn').disabled=false;
-      document.getElementById('startBtn').innerHTML='<i class="fa-solid fa-location-dot"></i> Enable Location & Start (10s prep)';
+      document.getElementById('startBtn').innerHTML='<i class="fa-solid fa-location-dot"></i> Enable Location & Start Scanning';
     }
     throw new Error(data.error);
   }
@@ -407,16 +403,6 @@ function startHeartbeat(){
   },3000);
 }
 function stopHeartbeat(){if(heartbeatTimer) clearInterval(heartbeatTimer);}
-function startPrep(){
-  showState('prep'); prepLeft=10;
-  document.getElementById('prepTimer').textContent=prepLeft;
-  document.getElementById('prepProgress').style.width='100%';
-  prepTimer=setInterval(()=>{
-    prepLeft--; document.getElementById('prepTimer').textContent=prepLeft;
-    document.getElementById('prepProgress').style.width=(prepLeft*10)+'%';
-    if(prepLeft<=0){clearInterval(prepTimer); showState('scan'); startCamera();}
-  },1000);
-}
 
 // QR Camera
 let stream=null, raf=null, scanning=false;
@@ -443,7 +429,6 @@ async function triggerScan(tokenVal){
   if(!input){document.getElementById('scanMsg').innerHTML='<span style="color:#dc2626">Enter token</span>';return;}
   document.getElementById('scanMsg').innerHTML='<span style="color:#2563eb"><i class="fa-solid fa-spinner fa-spin"></i> Validating…</span>';
   document.getElementById('scanBtn').disabled=true;
-  // also send latest location
   try{ await captureLocation(); }catch(e){}
   try{
     const payload={token: input};
@@ -453,14 +438,8 @@ async function triggerScan(tokenVal){
     if(res.ok){
       scanVerified=true; stopCamera();
       document.getElementById('scanMsg').innerHTML='<span style="color:#059669"><i class="fa-solid fa-circle-check"></i> '+data.message+'</span>';
-      // check if face required
-      const faceEnabled=await checkFaceToggle();
-      if(faceEnabled){
-        showFaceScan();
-      } else {
-        faceVerified=true;
-        startVerify();
-      }
+      // No face scan here — go directly to verification. Teacher handles face separately.
+      startVerify();
     } else {
       document.getElementById('scanMsg').innerHTML='<span style="color:#dc2626"><i class="fa-solid fa-triangle-exclamation"></i> '+(data.error||'Invalid')+'</span>';
       document.getElementById('scanBtn').disabled=false;
@@ -469,78 +448,15 @@ async function triggerScan(tokenVal){
 }
 document.getElementById('scanBtn')?.addEventListener('click',()=>triggerScan());
 
-// Face scan
-let faceStream=null;
-function showFaceScan(){
-  showState('face');
-  startFaceCamera();
-}
-async function startFaceCamera(){
-  try{
-    faceStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'}});
-    const v=document.getElementById('faceVideo'); v.srcObject=faceStream; await v.play();
-    document.getElementById('faceMsg').innerHTML='<span style="color:#1e40af"><i class="fa-solid fa-camera"></i> Show your face clearly — centered, good light.</span>';
-    // try FaceDetector for live feedback
-    if('FaceDetector' in window){
-      const detector=new FaceDetector({fastMode:true});
-      const iv=setInterval(async()=>{
-        if(!faceStream) {clearInterval(iv); return;}
-        try{
-          const faces=await detector.detect(v);
-          if(faces.length===1){
-            document.getElementById('faceMsg').innerHTML='<span style="color:#059669"><i class="fa-solid fa-circle-check"></i> Face detected — tap Capture</span>';
-          } else if(faces.length>1){
-            document.getElementById('faceMsg').innerHTML='<span style="color:#d97706">Multiple faces — only you should be visible</span>';
-          } else {
-            document.getElementById('faceMsg').innerHTML='<span style="color:#dc2626">No face detected — adjust position</span>';
-          }
-        }catch(e){}
-      }, 800);
-      v._faceIv=iv;
-    }
-  }catch(e){
-    document.getElementById('faceMsg').innerHTML='<span style="color:#dc2626">Camera denied — face verification requires camera. Enable to proceed.</span>';
-  }
-}
-function stopFaceCamera(){
-  if(faceStream){faceStream.getTracks().forEach(t=>t.stop()); faceStream=null;}
-  const v=document.getElementById('faceVideo');
-  if(v && v._faceIv) clearInterval(v._faceIv);
-}
-async function captureFace(){
-  const v=document.getElementById('faceVideo'), c=document.getElementById('faceCanvas');
-  if(!v || !faceStream){document.getElementById('faceMsg').innerHTML='<span style="color:#dc2626">Start camera first</span>';return;}
-  c.width=v.videoWidth; c.height=v.videoHeight;
-  const ctx=c.getContext('2d'); ctx.drawImage(v,0,0,c.width,c.height);
-  const dataUrl=c.toDataURL('image/jpeg',0.8);
-  document.getElementById('faceMsg').innerHTML='<span style="color:#2563eb"><i class="fa-solid fa-spinner fa-spin"></i> Uploading face…</span>';
-  try{
-    const res=await fetch(`/attendance/api/attempt/${attemptId}/face/`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':'{{ csrf_token }}'},body:JSON.stringify({face_image: dataUrl})});
-    const data=await res.json();
-    if(res.ok){
-      faceVerified=true;
-      document.getElementById('faceMsg').innerHTML='<span style="color:#059669"><i class="fa-solid fa-circle-check"></i> Face verified ✓ — teacher will see your snapshot.</span>';
-      document.getElementById('faceContinueBtn').style.display='block';
-      stopFaceCamera();
-      // Auto continue after 1s
-      setTimeout(()=>{if(faceVerified) startVerify();}, 1200);
-    } else {
-      document.getElementById('faceMsg').innerHTML='<span style="color:#dc2626">'+(data.error||'Face failed')+'</span>';
-    }
-  }catch(e){document.getElementById('faceMsg').innerHTML='<span style="color:#dc2626">Network error</span>';}
-}
-
 function startVerify(){
-  // re-check face toggle before starting
   checkFaceToggle().then(enabled=>{
-    if(enabled && !faceVerified){
-      showFaceScan(); return;
-    }
     showState('verify'); verifyLeft=10;
+    setStep('verify');
     document.getElementById('verifyTimer').textContent=verifyLeft;
     document.getElementById('verifyProgress').style.width='100%';
-    document.getElementById('verifyMsg').textContent='Final checks: location 50m & face…';
-    document.getElementById('verifyLocationBadge').innerHTML= distanceM!==null && distanceM<=allowedRadius ? '<span class="badge badge-success"><i class="fa-solid fa-location-dot"></i> '+Math.round(distanceM)+'m within '+allowedRadius+'m ✓</span>' : '<span class="badge badge-danger">'+(distanceM?Math.round(distanceM)+'m':'—')+' outside</span>';
+    const faceNote = enabled ? 'Teacher face verification pending (in person) — location must be within 50m' : 'Final location check…';
+    document.getElementById('verifyMsg').textContent=faceNote;
+    document.getElementById('verifyLocationBadge').innerHTML= distanceM!==null && distanceM<=allowedRadius ? '<span class="badge badge-success"><i class="fa-solid fa-location-dot"></i> '+Math.round(distanceM)+'m within '+allowedRadius+'m ✓ (acc ±'+(studentAcc?Math.round(studentAcc)+'m':'?')+')</span>' : '<span class="badge badge-danger">'+(distanceM?Math.round(distanceM)+'m':'—')+' outside</span>';
     verifyTimer=setInterval(async()=>{
       verifyLeft--; document.getElementById('verifyTimer').textContent=verifyLeft;
       document.getElementById('verifyProgress').style.width=(verifyLeft*10)+'%';
@@ -554,12 +470,9 @@ function startVerify(){
             showSuccess(data.distance);
           } else {
             if(data.out_of_range){
-              invalidateUI(data.error + ' — Move within '+allowedRadius+'m and retry.');
-            } else if(data.face_required){
-              // face required error — show face again
-              document.getElementById('verifyMsg').textContent='';
-              showFaceScan();
-              document.getElementById('faceMsg').innerHTML='<span style="color:#dc2626"><i class="fa-solid fa-triangle-exclamation"></i> '+data.error+'</span>';
+              invalidateUI(data.error + ' — Move within '+allowedRadius+'m and retry. Your accuracy: ±'+(studentAcc?Math.round(studentAcc)+'m':'?')+'. Try outdoors or near window.');
+            } else if(data.teacher_location_missing){
+              invalidateUI(data.error);
             } else if(data.location_required){
               showFrozen('denied');
               invalidateUI(data.error);
@@ -576,8 +489,8 @@ function startVerify(){
 function showSuccess(dist){
   stopHeartbeat(); showState('success');
   document.getElementById('successTime').textContent=new Date().toLocaleTimeString();
-  document.getElementById('successDistance').textContent= dist? Math.round(dist)+'m from teacher' : '';
-  setStep('step4');
+  document.getElementById('successDistance').textContent= dist? Math.round(dist)+'m from teacher (your accuracy ±'+(studentAcc?Math.round(studentAcc)+'m':'?')+')' : '';
+  setStep('success');
   try{
     const canvas=document.getElementById('confetti'), ctx=canvas.getContext('2d');
     canvas.width=innerWidth; canvas.height=innerHeight;
@@ -586,38 +499,35 @@ function showSuccess(dist){
   }catch(e){}
 }
 function invalidateUI(msg){
-  stopHeartbeat(); if(prepTimer) clearInterval(prepTimer); if(verifyTimer) clearInterval(verifyTimer); stopCamera(); stopFaceCamera();
+  stopHeartbeat(); if(verifyTimer) clearInterval(verifyTimer); stopCamera();
   showState('invalid'); document.getElementById('invalidMsg').textContent=msg;
   document.getElementById('invalidTitle').textContent= msg.includes('Already')?'Already Marked':'Attempt Invalidated';
 }
 async function retry(){
-  scanVerified=false; faceVerified=!faceRequiredInitial;
+  scanVerified=false;
   if(attemptId){try{await fetch(`/attendance/api/attempt/${attemptId}/invalidate/`,{method:'POST',headers:{'X-CSRFToken':'{{ csrf_token }}'}});}catch(e){}}
   document.getElementById('scanBtn').disabled=false; document.getElementById('scanMsg').innerHTML='';
-  document.getElementById('faceMsg').innerHTML=''; document.getElementById('faceContinueBtn').style.display='none';
   document.getElementById('tokenInput').value=sessionToken; attemptId=null; showState('idle');
-  document.getElementById('startBtn').disabled=false; document.getElementById('startBtn').innerHTML='<i class="fa-solid fa-location-dot"></i> Enable Location & Start (10s prep)';
+  document.getElementById('startBtn').disabled=false; document.getElementById('startBtn').innerHTML='<i class="fa-solid fa-location-dot"></i> Enable Location & Start Scanning';
   updateHb('idle'); stopHeartbeat(); hideFrozen();
-  // recapture location
   try{await captureLocation();}catch(e){}
 }
 document.getElementById('startBtn')?.addEventListener('click', async()=>{
-  const btn=document.getElementById('startBtn'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Checking location…';
+  const btn=document.getElementById('startBtn'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Checking location (best of 3)…';
   try{await captureLocation();}catch(e){
-    // captureLocation already handles UI, but showFrozen if failed
     let reason='denied'; if(e.code===1) reason='denied'; else if(e.code===2) reason='unavailable'; else reason='timeout';
     showFrozen(reason);
-    btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-location-dot"></i> Enable Location & Start (10s prep)';
+    btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-location-dot"></i> Enable Location & Start Scanning';
     return;
   }
   btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Starting…';
-  try{await startAttempt();}catch(e){btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-location-dot"></i> Enable Location & Start (10s prep)';}
+  try{await startAttempt();}catch(e){btn.disabled=false; btn.innerHTML='<i class="fa-solid fa-location-dot"></i> Enable Location & Start Scanning';}
 });
 
 document.addEventListener('visibilitychange', async()=>{
-  if(document.hidden && (state==='prep'||state==='scan'||state==='face'||state==='verify') && attemptId){
+  if(document.hidden && (state==='scan'||state==='verify') && attemptId){
     setTimeout(async()=>{
-      if(document.hidden && attemptId && ['prep','scan','face','verify'].includes(state)){
+      if(document.hidden && attemptId && ['scan','verify'].includes(state)){
         try{await fetch(`/attendance/api/attempt/${attemptId}/invalidate/`,{method:'POST',headers:{'X-CSRFToken':'{{ csrf_token }}'}});}catch(e){}
         invalidateUI('You left the page — attempt INVALID. Retry.');
       }
@@ -625,7 +535,7 @@ document.addEventListener('visibilitychange', async()=>{
   }
 });
 window.addEventListener('pagehide', ()=>{
-  if(attemptId && ['prep','scan','face','verify'].includes(state)){
+  if(attemptId && ['scan','verify'].includes(state)){
     navigator.sendBeacon(`/attendance/api/attempt/${attemptId}/invalidate/`, new Blob([],{type:'application/json'}));
   }
 });
@@ -636,12 +546,9 @@ function goManual(){
   location.href='/attendance/verify/?session='+encodeURIComponent(t);
 }
 if(attemptId){updateHb('OPEN (existing)'); startHeartbeat();}
- // poll teacher location every 3s to detect face toggle or location change
 setInterval(checkFaceToggle, 3000);
- // initial location attempt
 captureLocation().catch(e=>{
-  // don't auto-freeze on load, only on start; but show hint
-  document.getElementById('sLat').textContent='Permission needed';
+  document.getElementById('sLat').textContent='Permission needed — tap Start';
 });
 </script>
 {% endif %}

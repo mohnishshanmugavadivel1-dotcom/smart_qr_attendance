@@ -248,19 +248,33 @@ def api_update_teacher_location(request, session_id):
         return JsonResponse({'error': 'latitude/longitude required'}, status=400)
     if not (-90 <= lat <= 90 and -180 <= lng <= 180):
         return JsonResponse({'error': 'Invalid coordinates'}, status=400)
+    # Optional accuracy (from best-of-3)
+    try:
+        acc = float(data.get('accuracy') or data.get('acc') or 0)
+        if acc <=0 or acc>10000: acc=None
+    except:
+        acc=None
     session.teacher_latitude = lat
     session.teacher_longitude = lng
     session.teacher_location_updated_at = timezone.now()
-    session.save(update_fields=['teacher_latitude','teacher_longitude','teacher_location_updated_at'])
+    session.teacher_location_accuracy = acc
+    # save with accuracy if field exists
+    try:
+        session.save(update_fields=['teacher_latitude','teacher_longitude','teacher_location_updated_at','teacher_location_accuracy'])
+    except:
+        session.save(update_fields=['teacher_latitude','teacher_longitude','teacher_location_updated_at'])
+    # Log warning if accuracy poor (>30m explains 21m offset)
+    if acc and acc>30:
+        logger.warning(f"Teacher location low accuracy ±{acc}m session {session.id} teacher {request.user.username} — distance will be off by ~{acc}m")
     # broadcast
     try:
         from channels.layers import get_channel_layer
         from asgiref.sync import async_to_sync
         layer=get_channel_layer()
         if layer:
-            async_to_sync(layer.group_send)(f"attendance_{session.id}", {"type":"attendance.update","data":{"type":"teacher_location","lat":lat,"lng":lng}})
+            async_to_sync(layer.group_send)(f"attendance_{session.id}", {"type":"attendance.update","data":{"type":"teacher_location","lat":lat,"lng":lng, "accuracy": acc}})
     except: pass
-    return JsonResponse({'success': True, 'lat': lat, 'lng': lng, 'radius': session.allowed_radius_meters})
+    return JsonResponse({'success': True, 'lat': lat, 'lng': lng, 'accuracy': acc, 'radius': session.allowed_radius_meters, 'warning': f'Accuracy ±{acc}m — move near window for better' if acc and acc>25 else None})
 
 @teacher_required
 @login_required
@@ -291,6 +305,70 @@ def api_toggle_face(request, session_id):
             async_to_sync(layer.group_send)(f"attendance_{session.id}", {"type":"attendance.update","data":{"type":"face_toggle","enabled":enabled}})
     except: pass
     return JsonResponse({'success': True, 'face_enabled': enabled})
+
+@teacher_required
+@login_required
+@require_POST
+def api_teacher_verify_face(request, session_id):
+    """Teacher captures student face via teacher's camera — TEACHER ONLY, manually on/off."""
+    session = get_object_or_404(AttendanceSession, id=session_id, teacher=request.user)
+    if session.is_closed():
+        return JsonResponse({'error': 'Session closed'}, status=400)
+    if not session.face_verification_enabled:
+        return JsonResponse({'error': 'Face verification is OFF — turn it ON to capture'}, status=400)
+    try:
+        data = json.loads(request.body) if request.content_type == 'application/json' else request.POST
+    except:
+        data = request.POST
+    student_id = data.get('student_id') or data.get('student')
+    face_image = data.get('face_image') or data.get('image')
+    if not student_id:
+        return JsonResponse({'error': 'student_id required'}, status=400)
+    if not face_image or not isinstance(face_image, str) or not face_image.startswith('data:image/'):
+        return JsonResponse({'error': 'face_image required (data:image/…)'}, status=400)
+    if not (face_image.startswith('data:image/jpeg') or face_image.startswith('data:image/png') or face_image.startswith('data:image/jpg')):
+        return JsonResponse({'error': 'Only JPEG/PNG allowed'}, status=400)
+    if len(face_image) > 300000:
+        return JsonResponse({'error': 'Image too large (300KB max)'}, status=400)
+    if ';base64,' not in face_image:
+        return JsonResponse({'error': 'Invalid base64'}, status=400)
+    from accounts.models import User
+    try:
+        student = User.objects.get(id=student_id, role='student')
+    except:
+        return JsonResponse({'error': 'Student not found'}, status=404)
+    if not Enrollment.objects.filter(student=student, classroom=session.classroom).exists():
+        return JsonResponse({'error': 'Student not enrolled'}, status=400)
+    # Find latest OPEN attempt for this student/session, or create a stub attempt for face queue
+    attempt = AttendanceAttempt.objects.filter(student=student, session=session, status='OPEN').order_by('-created_at').first()
+    if not attempt:
+        # No OPEN attempt yet — create one so face queue shows; location will be filled when student starts
+        # Allow teacher to pre-verify before QR — store as latest attempt with face only
+        last = AttendanceAttempt.objects.filter(student=student, session=session).order_by('-attempt_number').first()
+        next_num = (last.attempt_number + 1) if last else 1
+        attempt = AttendanceAttempt.objects.create(
+            student=student, session=session, attempt_number=next_num, status='OPEN',
+            face_image=face_image[:200000], face_verified=True, face_verified_by_teacher=True,
+            last_heartbeat=timezone.now()
+        )
+    else:
+        attempt.face_image = face_image[:200000]
+        attempt.face_verified = True
+        attempt.face_verified_by_teacher = True
+        attempt.save(update_fields=['face_image','face_verified','face_verified_by_teacher'])
+    # If student already has a PRESENT record, also mark face_verified there
+    rec = AttendanceRecord.objects.filter(session=session, student=student).first()
+    if rec and not rec.face_verified:
+        rec.face_verified = True
+        rec.save(update_fields=['face_verified'])
+    try:
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        layer=get_channel_layer()
+        if layer:
+            async_to_sync(layer.group_send)(f"attendance_{session.id}", {"type":"attendance.update","data":{"type":"face_captured","student": student.username, "by": "teacher"}})
+    except: pass
+    return JsonResponse({'success': True, 'student': student.username, 'roll': student.roll_number or '', 'face_verified': True, 'attempt_id': attempt.id})
 
 @teacher_required
 @login_required
@@ -466,13 +544,16 @@ def api_start_attempt(request):
         return JsonResponse({'error': 'You are not enrolled in this class'}, status=403)
     if AttendanceRecord.objects.filter(session=session, student=request.user, status='PRESENT').exists():
         return JsonResponse({'error': 'Already marked present', 'already_present': True}, status=409)
-    # LOCATION REQUIRED CHECK
+    # LOCATION REQUIRED CHECK — with accuracy
     lat = data.get('latitude') or data.get('lat') or data.get('student_latitude')
     lng = data.get('longitude') or data.get('lng') or data.get('student_longitude')
+    acc_raw = data.get('accuracy') or data.get('acc') or data.get('student_accuracy')
+    try:
+        acc = float(acc_raw) if acc_raw is not None else None
+        if acc is not None and (acc<=0 or acc>10000): acc=None
+    except:
+        acc=None
     if lat is None or lng is None:
-        # If location not provided, this is considered denial scenario but we still allow attempt creation?
-        # Spec: who doesnt allow location, should not be able to mark attendance and frozen message.
-        # So we reject start if no location
         return JsonResponse({'error': 'Location is required. Please enable location services. Frozen until enabled.', 'location_required': True}, status=400)
     try:
         lat = float(lat); lng = float(lng)
@@ -500,17 +581,33 @@ def api_start_attempt(request):
         return JsonResponse({'error': 'Verification already in progress', 'attempt_id': existing_open.id, 'already_open': True}, status=409)
     last = AttendanceAttempt.objects.filter(student=request.user, session=session).order_by('-attempt_number').first()
     next_num = (last.attempt_number + 1) if last else 1
-    attempt = AttendanceAttempt.objects.create(
-        student=request.user,
-        session=session,
-        attempt_number=next_num,
-        status='OPEN',
-        last_heartbeat=timezone.now(),
-        student_latitude=lat,
-        student_longitude=lng,
-        distance_meters=dist,
-        location_verified=(dist <= session.allowed_radius_meters),
-    )
+    # Store accuracy for debugging 21m issue
+    try:
+        attempt = AttendanceAttempt.objects.create(
+            student=request.user,
+            session=session,
+            attempt_number=next_num,
+            status='OPEN',
+            last_heartbeat=timezone.now(),
+            student_latitude=lat,
+            student_longitude=lng,
+            student_location_accuracy=acc,
+            distance_meters=dist,
+            location_verified=(dist <= session.allowed_radius_meters),
+        )
+    except Exception as e:
+        # Fallback if migration not yet applied
+        attempt = AttendanceAttempt.objects.create(
+            student=request.user,
+            session=session,
+            attempt_number=next_num,
+            status='OPEN',
+            last_heartbeat=timezone.now(),
+            student_latitude=lat,
+            student_longitude=lng,
+            distance_meters=dist,
+            location_verified=(dist <= session.allowed_radius_meters),
+        )
     # If far, we already store distance; client will show warning
     # Remove any previous denial since now they provided location
     LocationDenial.objects.filter(session=session, student=request.user).delete()
@@ -551,18 +648,28 @@ def api_scan(request, attempt_id):
         attempt.status = 'INVALID'
         attempt.save(update_fields=['status'])
         return JsonResponse({'error': 'Already marked present'}, status=409)
-    # Optional: update location if provided again
+    # Optional: update location if provided again (with accuracy)
     lat = data.get('latitude') or data.get('lat')
     lng = data.get('longitude') or data.get('lng')
+    acc = data.get('accuracy') or data.get('acc')
     if lat is not None and lng is not None:
         try:
             lat = float(lat); lng = float(lng)
+            try:
+                acc_f=float(acc) if acc is not None else None
+                if acc_f and (acc_f<=0 or acc_f>10000): acc_f=None
+            except: acc_f=None
             dist = haversine_meters(lat, lng, session.teacher_latitude, session.teacher_longitude)
             attempt.student_latitude = lat
             attempt.student_longitude = lng
+            if hasattr(attempt, 'student_location_accuracy'):
+                attempt.student_location_accuracy = acc_f
             attempt.distance_meters = dist
             attempt.location_verified = (dist is not None and dist <= session.allowed_radius_meters)
-            attempt.save(update_fields=['student_latitude','student_longitude','distance_meters','location_verified'])
+            try:
+                attempt.save(update_fields=['student_latitude','student_longitude','student_location_accuracy','distance_meters','location_verified'])
+            except:
+                attempt.save(update_fields=['student_latitude','student_longitude','distance_meters','location_verified'])
         except:
             pass
     attempt.scan_verified_at = timezone.now()
@@ -670,9 +777,12 @@ def api_verify_complete(request, attempt_id):
         # Do not mark present; keep attempt OPEN? But spec says cannot be present if outside 50m
         # Mark attempt INVALID? Keep for retry after moving closer
         return JsonResponse({'error': f'You are {dist:.0f}m away from classroom. Must be within {session.allowed_radius_meters}m. Move closer and retry.', 'distance': dist, 'out_of_range': True}, status=400)
-    # FACE ENFORCEMENT if enabled
+    # FACE ENFORCEMENT if enabled — now TEACHER-SIDE only (student does not upload face)
+    # Teacher must have captured face via teacher camera (face_verified_by_teacher or face_verified)
     if session.face_verification_enabled and not attempt.face_verified:
-        return JsonResponse({'error': 'Face verification required. Please complete face scan.', 'face_required': True}, status=400)
+        # Check if teacher pre-verified (face_verified_by_teacher) — already covered by face_verified flag
+        # If not verified, inform student to wait for teacher in-person check
+        return JsonResponse({'error': 'Face verification is ON — please ask teacher to capture your face via TEACHER camera (teacher portal → Face Verification → select your name → Capture). You do not need to do face scan here.', 'face_required': True, 'teacher_side': True}, status=400)
     try:
         with transaction.atomic():
             rec, created = AttendanceRecord.objects.get_or_create(

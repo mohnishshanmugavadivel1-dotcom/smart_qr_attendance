@@ -19,6 +19,7 @@ urlpatterns = [
     path('session/<uuid:session_id>/finalize/', views.finalize_session, name='finalize_session'),
     path('session/<uuid:session_id>/teacher-location/', views.api_update_teacher_location, name='teacher_location'),
     path('session/<uuid:session_id>/toggle-face/', views.api_toggle_face, name='toggle_face'),
+    path('session/<uuid:session_id>/teacher-verify-face/', views.api_teacher_verify_face, name='teacher_verify_face'),
     
     path('verify/', views.verify_page, name='verify_page'),
     path('scan/', views.scan_redirect, name='scan_redirect'),
