@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Classes — SmartQR{% endblock %}
+{% block content %}
+<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+  <h1 style="font-family:Space Grotesk,sans-serif;font-size:24px"><i class="fa-solid fa-school" style="color:var(--primary)"></i> Classes & Subjects</h1>
+  <span class="badge badge-primary">{{ classes|length }} classes • {{ subjects|length }} subjects</span>
+  {% if user.is_teacher or user.is_superuser %}
+    <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="document.getElementById('createClassModal').style.display='flex'"><i class="fa-solid fa-plus"></i> New Class</button>
+    <button class="btn btn-ghost btn-sm" onclick="document.getElementById('createSubjectModal').style.display='flex'"><i class="fa-solid fa-book"></i> New Subject</button>
+  {% endif %}
+</div>
+
+<div class="grid grid-3">
+  {% for c in classes %}
+    <div class="card card-pad">
+      <div style="display:flex;justify-content:space-between;align-items:start">
+        <div style="width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,#2563eb,#06b6d4);color:white;display:grid;place-items:center;font-size:18px"><i class="fa-solid fa-users"></i></div>
+        <span class="badge badge-success"><i class="fa-solid fa-user-graduate"></i> {{ c.student_count }} students</span>
+      </div>
+      <h3 style="font-family:Space Grotesk,sans-serif;margin-top:12px">{{ c.code }}</h3>
+      <div style="font-size:13px;color:var(--muted)">{{ c.name }} • Section {{ c.section }} • by {{ c.teacher.username }}</div>
+      <div class="divider"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        {% for e in c.enrollments.all|slice:":3" %}
+          <span class="badge" style="background:#f1f5f9;border:1px solid var(--border)">{{ e.student.username }}</span>
+        {% endfor %}
+        {% if c.student_count > 3 %}<span class="badge badge-dark">+{{ c.student_count|add:"-3" }} more</span>{% endif %}
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px">
+        {% if user.is_teacher or user.is_superuser %}
+          <a href="{% url 'classroom:manage' c.id %}" class="btn btn-dark btn-sm" style="flex:1"><i class="fa-solid fa-gear"></i> Manage</a>
+        {% endif %}
+        {% if user.is_student %}
+          <form method="post" action="{% url 'classroom:enroll_self' c.id %}" style="flex:1">
+            {% csrf_token %}
+            <button class="btn btn-primary btn-sm" style="width:100%"><i class="fa-solid fa-user-plus"></i> Join</button>
+          </form>
+        {% endif %}
+        <a href="{% url 'attendance:analytics' %}?class={{ c.code }}" class="btn btn-ghost btn-sm"><i class="fa-solid fa-chart-simple"></i></a>
+      </div>
+    </div>
+  {% empty %}
+    <div class="card card-pad" style="grid-column:1/-1;text-align:center;padding:40px">
+      <div style="width:64px;height:64px;border-radius:16px;background:#f1f5f9;display:grid;place-items:center;margin:0 auto 12px"><i class="fa-solid fa-school"></i></div>
+      <h3>No classes yet</h3>
+      <p style="color:var(--muted);font-size:14px;margin-top:6px">{% if user.is_teacher %}Create your first classroom to start taking attendance.{% else %}Ask your teacher to create a class or wait for it to appear here.{% endif %}</p>
+      {% if user.is_teacher %}<button class="btn btn-primary" style="margin-top:14px" onclick="document.getElementById('createClassModal').style.display='flex'">Create Class</button>{% endif %}
+    </div>
+  {% endfor %}
+</div>
+
+<div class="card card-pad" style="margin-top:18px">
+  <h3 style="font-family:Space Grotesk,sans-serif">Subjects</h3>
+  <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+    {% for s in subjects %}
+      <span class="badge" style="background:white;border:1px solid var(--border);padding:10px 14px;font-size:13px"><i class="fa-solid fa-book" style="color:var(--primary)"></i> {{ s.code }} — {{ s.name }}</span>
+    {% empty %}
+      <span style="color:var(--muted);font-size:13px">No subjects yet.</span>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Modals -->
+<div id="createClassModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);backdrop-filter:blur(6px);z-index:100;align-items:center;justify-content:center;padding:20px">
+  <div class="card" style="max-width:480px;width:100%;padding:24px">
+    <h3 style="font-family:Space Grotesk,sans-serif">Create Classroom</h3>
+    <form method="post" action="{% url 'classroom:create_class' %}" style="margin-top:16px">
+      {% csrf_token %}
+      <label class="label">Branch / Name (e.g., CSE, ECE)</label>
+      <input name="name" class="input" placeholder="CSE" required>
+      <label class="label" style="margin-top:12px">Section (e.g., A, B)</label>
+      <input name="section" class="input" placeholder="A" required>
+      <label class="label" style="margin-top:12px">Code (unique, e.g., CSE-A-2025)</label>
+      <input name="code" class="input" placeholder="CSE-A-2025" required>
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button type="button" class="btn btn-ghost" style="flex:1" onclick="this.closest('#createClassModal').style.display='none'">Cancel</button>
+        <button class="btn btn-primary" style="flex:1">Create</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="createSubjectModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);backdrop-filter:blur(6px);z-index:100;align-items:center;justify-content:center;padding:20px">
+  <div class="card" style="max-width:480px;width:100%;padding:24px">
+    <h3 style="font-family:Space Grotesk,sans-serif">Create Subject</h3>
+    <form method="post" action="{% url 'classroom:create_subject' %}" style="margin-top:16px">
+      {% csrf_token %}
+      <label class="label">Subject Name</label>
+      <input name="name" class="input" placeholder="Data Structures" required>
+      <label class="label" style="margin-top:12px">Code (unique)</label>
+      <input name="code" class="input" placeholder="CS201" required>
+      <label class="label" style="margin-top:12px">Description</label>
+      <textarea name="description" class="textarea" placeholder="Optional"></textarea>
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button type="button" class="btn btn-ghost" style="flex:1" onclick="this.closest('#createSubjectModal').style.display='none'">Cancel</button>
+        <button class="btn btn-primary" style="flex:1">Create</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('#createClassModal, #createSubjectModal').forEach(m=> m.addEventListener('click', e=>{ if(e.target===m) m.style.display='none'; }));
+</script>
+{% endblock %}

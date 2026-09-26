@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Login — SmartQR{% endblock %}
+{% block content %}
+<div style="max-width:480px;margin:40px auto">
+  <div style="text-align:center;margin-bottom:28px">
+    <div style="width:64px;height:64px;border-radius:16px;background:linear-gradient(135deg,#2563eb,#4f46e5);display:grid;place-items:center;color:white;font-size:22px;margin:0 auto 14px" aria-hidden="true"><i class="fa-solid fa-right-to-bracket"></i></div>
+    <h1 style="font-family:Space Grotesk,sans-serif;font-size:28px;letter-spacing:-.02em">Welcome back</h1>
+    <p style="color:var(--muted);margin-top:6px;font-size:14px">Sign in to your classroom workspace</p>
+    {% if pending_session %}<div style="margin-top:12px" class="badge badge-warning" role="status"><i class="fa-solid fa-qrcode" aria-hidden="true"></i> QR session pending — login to continue verification</div>{% endif %}
+  </div>
+  <div class="card card-pad" style="padding:28px">
+    <form method="post" novalidate aria-label="Login form">
+      {% csrf_token %}
+      {% if pending_session %}<input type="hidden" name="session" value="{{ pending_session }}">{% endif %}
+      {% if form.non_field_errors %}<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:10px 12px;border-radius:12px;font-size:13px;margin-bottom:14px" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div>
+          <label for="id_username" class="label">Username <span aria-hidden="true" style="color:var(--danger)">*</span></label>
+          <input type="text" name="username" id="id_username" class="input" placeholder="e.g., teacher01 or student01" required autocomplete="username" value="{{ form.username.value|default:'' }}" aria-required="true" aria-invalid="{% if form.username.errors %}true{% else %}false{% endif %}">
+          {% if form.username.errors %}<div style="color:var(--danger);font-size:12px;margin-top:6px" role="alert">{{ form.username.errors }}</div>{% endif %}
+        </div>
+        <div>
+          <label for="id_password" class="label">Password <span aria-hidden="true" style="color:var(--danger)">*</span></label>
+          <input type="password" name="password" id="id_password" class="input" placeholder="••••••••" required autocomplete="current-password" aria-required="true">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%;padding:14px">Sign In <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
+      </div>
+    </form>
+    <p style="text-align:center;margin-top:18px;font-size:14px;color:var(--muted)">New here? <a href="{% url 'accounts:register' %}{% if pending_session %}?session={{ pending_session }}{% endif %}" style="color:var(--primary);font-weight:700">Create an account</a></p>
+    <div class="divider" role="separator"></div>
+    <div style="background:#f8fafc;border:1px dashed var(--border);border-radius:14px;padding:14px">
+      <div style="font-weight:800;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:10px"><i class="fa-solid fa-flask" aria-hidden="true"></i> Demo Accounts</div>
+      <div class="grid grid-2" style="gap:10px;font-size:12px">
+        <div style="background:white;border:1px solid var(--border);border-radius:12px;padding:12px">
+          <b style="color:var(--primary)"><i class="fa-solid fa-chalkboard-user" aria-hidden="true"></i> Teacher</b><br>
+          <code style="background:#f1f5f9;padding:2px 6px;border-radius:6px">teacher01 / teacher123</code>
+        </div>
+        <div style="background:white;border:1px solid var(--border);border-radius:12px;padding:12px">
+          <b style="color:#059669"><i class="fa-solid fa-user-graduate" aria-hidden="true"></i> Student</b><br>
+          <code style="background:#f1f5f9;padding:2px 6px;border-radius:6px">student01 / student123</code>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:8px">Run <code>python manage.py seed_demo</code> if not created yet.</div>
+    </div>
+  </div>
+</div>
+{% endblock %}

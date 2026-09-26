@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: smart-qr-attendance
+    env: python
+    plan: free
+    # If you keep this file in GitHub, Render will auto-sync this config (Infrastructure as Code)
+    buildCommand: "./build.sh"
+    startCommand: "daphne -b 0.0.0.0 -p $PORT config.asgi:application"
+    envVars:
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: PYTHON_VERSION
+        value: "3.13.0"
+      - key: WEB_CONCURRENCY
+        value: "2"
+      # Uncomment below to use managed Postgres (recommended for prod)
+      # - key: DATABASE_URL
+      #   fromDatabase:
+      #     name: smartqr-db
+      #     property: connectionString
+      # Uncomment to enable Redis for Channels (scale WebSocket across workers)
+      # - key: REDIS_URL
+      #   fromService:
+      #     type: redis
+      #     name: smartqr-redis
+      #     property: connectionString
+
+# Optional: uncomment to provision DB + Redis automatically on first deploy
+# databases:
+#   - name: smartqr-db
+#     plan: free
+#     databaseName: smartqr
+#     user: smartqr
+#
+# redis:
+#   - name: smartqr-redis
+#     plan: free
+#     maxmemoryPolicy: allkeys-lru

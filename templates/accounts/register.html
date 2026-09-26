@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Create Account — SmartQR{% endblock %}
+{% block content %}
+<div style="max-width:580px;margin:20px auto">
+  <div style="text-align:center;margin-bottom:22px">
+    <div style="width:64px;height:64px;border-radius:16px;background:linear-gradient(135deg,#0f172a,#4f46e5);display:grid;place-items:center;color:white;font-size:22px;margin:0 auto 14px" aria-hidden="true"><i class="fa-solid fa-user-plus"></i></div>
+    <h1 style="font-family:Space Grotesk,sans-serif;font-size:28px;letter-spacing:-.02em">Create your account</h1>
+    <p style="color:var(--muted);margin-top:6px">Join as a teacher or student — role controls what you can do.</p>
+  </div>
+  <div class="card card-pad" style="padding:28px">
+    <form method="post" novalidate aria-label="Registration form">
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:10px 12px;border-radius:12px;font-size:13px;margin-bottom:14px" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+      <div class="grid grid-2">
+        <div>
+          <label for="id_username" class="label">Username <span aria-hidden="true" style="color:var(--danger)">*</span></label>
+          <input type="text" name="username" id="id_username" class="input" placeholder="e.g., arjun_2025" required autocomplete="username" value="{{ form.username.value|default:'' }}" aria-required="true" maxlength="150">
+          {% if form.username.errors %}<div style="color:var(--danger);font-size:12px;margin-top:6px" role="alert">{{ form.username.errors.0 }}</div>{% endif %}
+        </div>
+        <div>
+          <label for="id_email" class="label">Email <span aria-hidden="true" style="color:var(--danger)">*</span></label>
+          <input type="email" name="email" id="id_email" class="input" placeholder="you@example.com" required autocomplete="email" value="{{ form.email.value|default:'' }}" aria-required="true">
+          {% if form.email.errors %}<div style="color:var(--danger);font-size:12px;margin-top:6px" role="alert">{{ form.email.errors.0 }}</div>{% endif %}
+        </div>
+      </div>
+      <fieldset style="margin-top:16px;border:none;padding:0">
+        <legend class="label" style="margin-bottom:8px">I am a <span aria-hidden="true" style="color:var(--danger)">*</span></legend>
+        <div class="grid grid-2">
+          <label style="cursor:pointer" for="role_student">
+            <input type="radio" name="role" value="student" id="role_student" {% if form.role.value == 'student' or not form.role.value %}checked{% endif %} style="display:none">
+            <div class="card" style="padding:16px;border:2px solid var(--border);transition:.2s" id="role-student">
+              <div style="display:flex;gap:12px;align-items:center">
+                <div style="width:44px;height:44px;border-radius:12px;background:#ecfdf5;color:#059669;display:grid;place-items:center;font-size:18px" aria-hidden="true"><i class="fa-solid fa-user-graduate"></i></div>
+                <div>
+                  <b style="display:block">Student</b>
+                  <span style="font-size:12px;color:var(--muted)">Scan QR & get marked present</span>
+                </div>
+                <i class="fa-solid fa-circle-check" style="margin-left:auto;color:var(--success);opacity:1" id="check-student" aria-hidden="true"></i>
+              </div>
+            </div>
+          </label>
+          <label style="cursor:pointer" for="role_teacher">
+            <input type="radio" name="role" value="teacher" id="role_teacher" {% if form.role.value == 'teacher' %}checked{% endif %} style="display:none">
+            <div class="card" style="padding:16px;border:2px solid var(--border);transition:.2s" id="role-teacher">
+              <div style="display:flex;gap:12px;align-items:center">
+                <div style="width:44px;height:44px;border-radius:12px;background:#eff6ff;color:var(--primary);display:grid;place-items:center;font-size:18px" aria-hidden="true"><i class="fa-solid fa-chalkboard-user"></i></div>
+                <div>
+                  <b style="display:block">Teacher</b>
+                  <span style="font-size:12px;color:var(--muted)">Create QR sessions & finalize</span>
+                </div>
+                <i class="fa-solid fa-circle-check" style="margin-left:auto;color:var(--success);opacity:0" id="check-teacher" aria-hidden="true"></i>
+              </div>
+            </div>
+          </label>
+        </div>
+      </fieldset>
+      <div style="margin-top:16px">
+        <label for="id_roll_number" class="label">Roll Number <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#94a3b8">(required for students, e.g., 22CSE001)</span></label>
+        <input type="text" name="roll_number" id="id_roll_number" class="input" placeholder="22CSE001" value="{{ form.roll_number.value|default:'' }}" autocomplete="off" maxlength="30">
+        {% if form.roll_number.errors %}<div style="color:var(--danger);font-size:12px;margin-top:6px" role="alert">{{ form.roll_number.errors.0 }}</div>{% endif %}
+      </div>
+      <div class="grid grid-2" style="margin-top:16px">
+        <div>
+          <label for="id_password1" class="label">Password <span aria-hidden="true" style="color:var(--danger)">*</span></label>
+          <input type="password" name="password1" id="id_password1" class="input" placeholder="At least 8 characters" required autocomplete="new-password" aria-required="true">
+          {% if form.password1.errors %}<div style="color:var(--danger);font-size:12px;margin-top:6px" role="alert">{{ form.password1.errors.0 }}</div>{% endif %}
+        </div>
+        <div>
+          <label for="id_password2" class="label">Confirm Password <span aria-hidden="true" style="color:var(--danger)">*</span></label>
+          <input type="password" name="password2" id="id_password2" class="input" placeholder="Repeat password" required autocomplete="new-password" aria-required="true">
+          {% if form.password2.errors %}<div style="color:var(--danger);font-size:12px;margin-top:6px" role="alert">{{ form.password2.errors.0 }}</div>{% endif %}
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:20px;padding:14px;font-size:15px">Create Account <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
+    </form>
+    <p style="text-align:center;margin-top:16px;font-size:14px;color:var(--muted)">Already have an account? <a href="{% url 'accounts:login' %}" style="color:var(--primary);font-weight:700">Sign in</a></p>
+  </div>
+</div>
+<script>
+const radios=document.querySelectorAll('input[name="role"]');
+function update(){
+  const v=document.querySelector('input[name="role"]:checked').value;
+  document.getElementById('role-student').style.borderColor=v==='student'?'#10b981':'#e2e8f0';
+  document.getElementById('role-student').style.background=v==='student'?'#ecfdf5':'white';
+  document.getElementById('role-teacher').style.borderColor=v==='teacher'?'#2563eb':'#e2e8f0';
+  document.getElementById('role-teacher').style.background=v==='teacher'?'#eff6ff':'white';
+  document.getElementById('check-student').style.opacity=v==='student'?'1':'0';
+  document.getElementById('check-teacher').style.opacity=v==='teacher'?'1':'0';
+}
+radios.forEach(r=>r.addEventListener('change',update)); update();
+</script>
+{% endblock %}

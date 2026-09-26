@@ -1,0 +1,454 @@
+{% extends "base.html" %}
+{% block title %}Session {{ session.classroom.code }} — SmartQR{% endblock %}
+{% block head %}
+<style>
+.qr-wrap{background:white;border:1px solid var(--border);border-radius:20px;padding:18px;text-align:center}
+.countdown{font-family:Space Grotesk,sans-serif;font-size:42px;font-weight:800;letter-spacing:-.04em;line-height:1}
+.progress-lg{height:10px;border-radius:999px;background:#e2e8f0;overflow:hidden}
+.progress-lg span{height:100%;display:block;background:linear-gradient(90deg,#2563eb,#06b6d4);transition:width .3s}
+.student-row{transition:.15s}
+.student-row:hover{transform:translateY(-1px);box-shadow:var(--shadow)}
+.switch{position:relative;width:52px;height:30px;background:#e2e8f0;border-radius:999px;cursor:pointer;transition:.3s}
+.switch.on{background:#0f172a}
+.switch span{position:absolute;top:3px;left:3px;width:24px;height:24px;background:white;border-radius:999px;transition:.3s;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.switch.on span{transform:translateX(22px)}
+.video-wrap{border-radius:16px;overflow:hidden;background:#0f172a;position:relative}
+</style>
+{% endblock %}
+{% block content %}
+<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+  <a href="{% url 'attendance:teacher_dashboard' %}" class="btn btn-ghost btn-sm"><i class="fa-solid fa-arrow-left"></i> Dashboard</a>
+  <span class="badge badge-dark"><i class="fa-solid fa-fingerprint"></i> {{ session.id|slice:":8" }}</span>
+  <span class="badge {% if session.status == 'OPEN' %}badge-success{% elif session.status == 'EXPIRED' %}badge-warning{% else %}badge-dark{% endif %}" id="statusBadge">{{ session.status }}</span>
+  <span class="badge badge-primary">{{ session.classroom.code }} • {{ session.subject.name }}</span>
+  <span class="badge {% if session.face_verification_enabled %}badge-dark{% else %}badge-primary{% endif %}" id="faceBadge"><i class="fa-solid fa-camera"></i> Face {% if session.face_verification_enabled %}ON{% else %}OFF{% endif %}</span>
+  <span class="badge badge-success"><i class="fa-solid fa-location-dot"></i> {{ session.allowed_radius_meters }}m geofence</span>
+  <span style="margin-left:auto" class="badge {% if session.teacher_latitude %}badge-success{% else %}badge-danger{% endif %}" id="teacherLocBadge">{% if session.teacher_latitude %}<i class="fa-solid fa-location-crosshairs"></i> Teacher located{% else %}<i class="fa-solid fa-triangle-exclamation"></i> Teacher location not set{% endif %}</span>
+</div>
+
+<div class="grid" style="grid-template-columns:420px 1fr;gap:20px;align-items:start">
+  <!-- LEFT -->
+  <div style="display:flex;flex-direction:column;gap:16px;position:sticky;top:88px">
+    <div class="card card-pad">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3 style="font-family:Space Grotesk,sans-serif;font-size:18px">QR Code</h3>
+        <span class="badge badge-primary"><i class="fa-solid fa-stopwatch"></i> 30s</span>
+      </div>
+      <div class="qr-wrap" style="margin-top:14px">
+        <img id="qrImg" src="{{ qr_b64 }}" alt="QR" style="width:280px;height:280px;max-width:100%;object-fit:contain;border-radius:12px">
+        <div style="margin-top:12px;font-size:12px;color:var(--muted);word-break:break-all;background:#f8fafc;border:1px dashed var(--border);border-radius:12px;padding:10px" id="payloadBox">{{ payload }}</div>
+        <div style="margin-top:12px;display:flex;gap:8px;justify-content:center">
+          <button class="btn btn-ghost btn-sm" onclick="copyPayload()"><i class="fa-solid fa-copy"></i> Copy</button>
+          <button class="btn btn-ghost btn-sm" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
+          <a class="btn btn-ghost btn-sm" href="{{ qr_b64 }}" download="qr-{{ session.id }}.png"><i class="fa-solid fa-download"></i> PNG</a>
+        </div>
+      </div>
+      <div style="margin-top:16px;background:var(--dark);color:white;border-radius:16px;padding:16px;text-align:center">
+        <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;opacity:.7;font-weight:800">Time Remaining</div>
+        <div class="countdown" id="countdown">30s</div>
+        <div class="progress-lg" style="margin-top:12px"><span id="progressBar" style="width:100%"></span></div>
+        <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
+          <span class="badge" style="background:rgba(255,255,255,.12);color:white" id="serverStatus"><i class="fa-solid fa-server"></i> Server time</span>
+          <span class="badge" style="background:rgba(255,255,255,.12);color:white"><span class="status-dot pulse" style="background:#22c55e"></span> Live</span>
+        </div>
+        <div style="font-size:12px;opacity:.7;margin-top:8px" id="expiryHint">Valid scan before expiry may finish 10s verification even after QR expires.</div>
+      </div>
+      <div id="expiredNotice" style="display:none;margin-top:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:12px;font-size:13px">
+        <b style="color:#92400e"><i class="fa-solid fa-triangle-exclamation"></i> QR Expired</b>
+        <div style="color:#92400e;margin-top:4px">Manual marking still available — confirmation required.</div>
+      </div>
+    </div>
+
+    <!-- Teacher Controls: Location + Face Toggle -->
+    <div class="card card-pad">
+      <h4 style="font-family:Space Grotesk,sans-serif;display:flex;gap:8px;align-items:center"><i class="fa-solid fa-sliders" style="color:var(--primary)"></i> Teacher Controls</h4>
+      
+      <div style="margin-top:14px;background:#f8fafc;border:1px solid var(--border);border-radius:14px;padding:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <b style="font-size:13px"><i class="fa-solid fa-camera" style="color:var(--primary)"></i> Face Verification</b>
+          <div style="display:flex;gap:10px;align-items:center">
+            <span id="faceToggleLabel" style="font-size:12px;font-weight:700;color:{% if session.face_verification_enabled %}#0f172a{% else %}var(--muted){% endif %}">{% if session.face_verification_enabled %}ON{% else %}OFF{% endif %}</span>
+            <div class="switch {% if session.face_verification_enabled %}on{% endif %}" id="faceSwitch" onclick="toggleFace()"><span></span></div>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px">Only <b>you</b> can toggle. When ON, students must pass face scan via camera. Your camera is used for liveness — students' face snapshots appear below for your approval.</div>
+        <div style="margin-top:10px;display:flex;gap:8px">
+          <button class="btn btn-dark btn-sm" id="teacherCameraBtn" onclick="toggleTeacherCamera()"><i class="fa-solid fa-video"></i> <span id="teacherCamText">Start My Camera</span></button>
+          <span class="badge badge-primary" id="teacherCamStatus">Camera off</span>
+        </div>
+        <div class="video-wrap" id="teacherCamWrap" style="display:none;margin-top:10px">
+          <video id="teacherVideo" autoplay playsinline muted style="width:100%;height:220px;object-fit:cover;display:block"></video>
+          <div style="position:absolute;top:8px;left:8px;background:rgba(15,23,42,.8);color:white;padding:6px 10px;border-radius:999px;font-size:11px;font-weight:800"><i class="fa-solid fa-camera"></i> Teacher Camera • Face Scan Active</div>
+          <div style="position:absolute;bottom:8px;left:8px;right:8px;background:rgba(255,255,255,.95);border-radius:10px;padding:8px 10px;font-size:11px;display:flex;gap:8px;align-items:center">
+            <span class="status-dot pulse" style="background:#22c55e"></span> <span id="teacherFaceStatus">Waiting for face…</span>
+            <span style="margin-left:auto" class="badge badge-success"><i class="fa-solid fa-shield-halved"></i> Your camera verifies session</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <b style="font-size:13px;color:#1e40af"><i class="fa-solid fa-location-crosshairs"></i> My Location (50m source)</b>
+          <span class="badge {% if session.teacher_latitude %}badge-success{% else %}badge-danger{% endif %}" id="locBadge">{% if session.teacher_latitude %}Set{% else %}Not set{% endif %}</span>
+        </div>
+        <div style="margin-top:8px;background:white;border:1px solid #bfdbfe;border-radius:10px;padding:10px;font-size:12px">
+          <div><b>Lat:</b> <span id="tLat">{% if session.teacher_latitude %}{{ session.teacher_latitude }}{% else %}—{% endif %}</span> <b style="margin-left:12px">Lng:</b> <span id="tLng">{% if session.teacher_longitude %}{{ session.teacher_longitude }}{% else %}—{% endif %}</span></div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">Radius: <b>{{ session.allowed_radius_meters }}m</b> • Last update: {% if session.teacher_location_updated_at %}{{ session.teacher_location_updated_at|date:"H:i:s" }}{% else %}never{% endif %}</div>
+        </div>
+        <button class="btn btn-primary btn-sm" style="width:100%;margin-top:10px" onclick="captureTeacherLocation()"><i class="fa-solid fa-location-dot"></i> Capture / Update My Location</button>
+        <div style="font-size:11px;color:#1e40af;margin-top:6px">Without this, students cannot be marked PRESENT — they see “Teacher location not set”.</div>
+      </div>
+
+      <div style="margin-top:14px;display:flex;gap:10px">
+        <div style="flex:1;background:#f8fafc;border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center">
+          <div style="font-family:Space Grotesk,sans-serif;font-size:28px;font-weight:800" id="presentCount">{{ present_count }}</div>
+          <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:800">Present</div>
+        </div>
+        <div style="flex:1;background:#f8fafc;border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center">
+          <div style="font-family:Space Grotesk,sans-serif;font-size:28px;font-weight:800">{{ total }}</div>
+          <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:800">Enrolled</div>
+        </div>
+      </div>
+      <div class="progress" style="margin-top:10px"><span id="presentProgress" style="width:{% widthratio present_count total 100 %}%"></span></div>
+      <div style="font-size:12px;color:var(--muted);text-align:center;margin-top:6px"><span id="presentText">{{ present_count }} / {{ total }}</span> • <span id="pctText">{% widthratio present_count total 100 %}%</span></div>
+      <div style="margin-top:12px;display:flex;gap:10px">
+        {% if not is_closed %}
+          <form method="post" action="{% url 'attendance:finalize_session' session.id %}" onsubmit="return confirm('Finalize? Remaining will be ABSENT.')" style="flex:1">
+            {% csrf_token %}
+            <button class="btn btn-dark" style="width:100%"><i class="fa-solid fa-lock"></i> Finalize & Mark Absent</button>
+          </form>
+        {% else %}
+          <div style="flex:1;background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;border-radius:12px;padding:12px;text-align:center;font-weight:700"><i class="fa-solid fa-circle-check"></i> Closed</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT -->
+  <div style="display:flex;flex-direction:column;gap:16px">
+    <!-- Location Denials — Critical Feature -->
+    <div class="card card-pad" style="border:1px solid #fecaca;background:linear-gradient(180deg,#fff, #fef2f2)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3 style="font-family:Space Grotesk,sans-serif;color:#991b1b"><i class="fa-solid fa-location-dot"></i> Location Denied — Students Blocked <span class="badge badge-danger" id="denialCount">{{ denials|length }}</span></h3>
+        <span class="badge badge-dark"><i class="fa-solid fa-bell"></i> Sent to you</span>
+      </div>
+      <div style="font-size:12px;color:#7f1d1d;margin-top:6px">These students <b>denied / disabled location</b> — they are <b>frozen</b> on a full-screen overlay until they enable location, and cannot be marked PRESENT. Names/rolls are listed here per your request.</div>
+      <div id="denialsList" style="margin-top:12px;display:flex;flex-direction:column;gap:8px;max-height:200px;overflow:auto">
+        {% for d in denials %}
+          <div style="display:flex;gap:12px;align-items:center;padding:10px 12px;background:white;border:1px solid #fecaca;border-radius:12px">
+            <div style="width:36px;height:36px;border-radius:10px;background:#fef2f2;color:#dc2626;display:grid;place-items:center;font-weight:800">{{ d.student.username|slice:":1"|upper }}</div>
+            <div style="flex:1">
+              <b style="font-size:13px">{{ d.student.username }} <span style="color:var(--muted);font-weight:400">• {{ d.student.roll_number|default:"—" }}</span></b>
+              <div style="font-size:11px;color:#991b1b"><i class="fa-solid fa-circle-xmark"></i> {{ d.get_reason_display }} • {{ d.created_at|date:"H:i:s" }}</div>
+            </div>
+            <span class="badge badge-danger">{{ d.reason }}</span>
+          </div>
+        {% empty %}
+          <div style="text-align:center;padding:16px;color:#059669;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:12px"><i class="fa-solid fa-circle-check"></i> No denials — everyone allowed location.</div>
+        {% endfor %}
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:var(--muted)">Auto-updates via WebSocket + polling every 2s.</div>
+    </div>
+
+    <!-- Face Queue (when face enabled) -->
+    <div class="card card-pad" id="faceQueueCard" style="{% if not session.face_verification_enabled %}display:none{% endif %}">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3 style="font-family:Space Grotesk,sans-serif"><i class="fa-solid fa-camera" style="color:var(--primary)"></i> Face Verification Queue <span class="badge badge-dark" id="faceQueueCount">{{ face_queue|length }}</span></h3>
+        <span class="badge badge-primary">Teacher camera on</span>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-top:6px">Students' face snapshots appear here when they complete face scan. You see thumbnails live — you can visually confirm.</div>
+      <div id="faceQueue" style="margin-top:12px;display:flex;gap:10px;overflow:auto;padding-bottom:6px">
+        {% for a in face_queue %}
+          <div style="min-width:140px;background:white;border:1px solid var(--border);border-radius:12px;padding:10px;text-align:center">
+            <img src="{{ a.face_image }}" style="width:120px;height:120px;object-fit:cover;border-radius:10px;border:1px solid var(--border)">
+            <div style="font-size:12px;font-weight:700;margin-top:6px">{{ a.student.username }}</div>
+            <div style="font-size:11px;color:var(--muted)">{{ a.student.roll_number|default:"" }}</div>
+            <span class="badge badge-success" style="margin-top:6px"><i class="fa-solid fa-check"></i> Face OK</span>
+          </div>
+        {% empty %}
+          <div style="flex:1;text-align:center;padding:20px;color:var(--muted);background:#f8fafc;border:1px dashed var(--border);border-radius:12px">No faces yet — students' captures appear here when face verification is ON.</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="card card-pad">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <h3 style="font-family:Space Grotesk,sans-serif">Live Attendance <span class="badge badge-primary" style="margin-left:8px"><span class="status-dot pulse" style="background:#2563eb"></span> <span id="liveBadge">Live via WebSocket</span></span></h3>
+        <span class="badge badge-success"><i class="fa-solid fa-bolt"></i> + Geofence & Face</span>
+      </div>
+      <div id="liveFeed" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"></div>
+      <div style="margin-top:16px;overflow:auto;border:1px solid var(--border);border-radius:14px">
+        <table class="table" id="attendanceTable">
+          <thead>
+            <tr>
+              <th>Student</th><th>Roll</th><th>Status</th><th>Distance / Face</th><th>Time</th><th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="studentsBody">
+            {% for row in students_data %}
+              <tr class="student-row" data-student="{{ row.student.id }}" data-username="{{ row.student.username }}">
+                <td>
+                  <div style="display:flex;gap:10px;align-items:center">
+                    <div style="width:36px;height:36px;border-radius:10px;background:{% if row.status == 'PRESENT' %}#ecfdf5{% elif row.status == 'LOCATION_DENIED' %}#fef2f2{% else %}#f1f5f9{% endif %};color:{% if row.status == 'PRESENT' %}#059669{% elif row.status == 'LOCATION_DENIED' %}#dc2626{% else %}#64748b{% endif %};display:grid;place-items:center;font-weight:800">{{ row.student.username|slice:":1"|upper }}</div>
+                    <div>
+                      <b style="font-size:14px">{{ row.student.username }}</b>
+                      <div style="font-size:11px;color:var(--muted)">{{ row.student.email }}</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="badge" style="background:#f8fafc;border:1px solid var(--border)">{{ row.enrollment.roll_number|default:row.student.roll_number|default:"-" }}</span></td>
+                <td>
+                  {% if row.status == 'PRESENT' %}
+                    <span class="badge badge-success"><i class="fa-solid fa-circle-check"></i> PRESENT</span>
+                  {% elif row.status == 'LOCATION_DENIED' %}
+                    <span class="badge badge-danger"><i class="fa-solid fa-location-dot"></i> LOCATION DENIED</span>
+                  {% elif row.status == 'ABSENT' %}
+                    <span class="badge badge-danger"><i class="fa-solid fa-circle-xmark"></i> ABSENT</span>
+                  {% else %}
+                    <span class="badge" style="background:#f1f5f9;color:var(--muted)"><i class="fa-regular fa-clock"></i> PENDING</span>
+                  {% endif %}
+                  {% if row.denial %}<div style="font-size:10px;color:#dc2626;margin-top:4px"><i class="fa-solid fa-triangle-exclamation"></i> Frozen until location enabled</div>{% endif %}
+                </td>
+                <td style="font-size:12px">
+                  {% if row.record and row.record.distance_meters != None %}
+                    <span class="badge {% if row.record.distance_meters <= session.allowed_radius_meters %}badge-success{% else %}badge-danger{% endif %}"><i class="fa-solid fa-ruler"></i> {{ row.record.distance_meters|floatformat:0 }}m</span>
+                    {% if row.record.face_verified %}<span class="badge badge-primary"><i class="fa-solid fa-camera"></i> Face</span>{% endif %}
+                  {% elif row.attempt and row.attempt.distance_meters != None %}
+                    <span class="badge" style="background:#fffbeb;border:1px solid #fde68a;color:#92400e">{{ row.attempt.distance_meters|floatformat:0 }}m • {% if row.attempt.location_verified %}in range{% else %}out of range{% endif %}</span>
+                    {% if row.attempt.face_verified %}<span class="badge badge-primary">Face OK</span>{% endif %}
+                  {% elif row.denial %}
+                    <span class="badge badge-danger"><i class="fa-solid fa-ban"></i> No location</span>
+                  {% else %}
+                    <span style="color:var(--muted)">—</span>
+                  {% endif %}
+                </td>
+                <td style="font-size:12px;color:var(--muted)">{% if row.record %}{{ row.record.marked_at|date:"H:i:s" }}{% else %}—{% endif %}</td>
+                <td>
+                  {% if row.status != 'PRESENT' and row.status != 'LOCATION_DENIED' and not is_closed %}
+                    <button class="btn btn-primary btn-sm manualBtn" data-student="{{ row.student.id }}" data-name="{{ row.student.username }}"><i class="fa-solid fa-hand"></i> Mark</button>
+                  {% elif row.status == 'LOCATION_DENIED' %}
+                    <span style="font-size:11px;color:#dc2626;font-weight:700"><i class="fa-solid fa-lock"></i> Denied</span>
+                  {% elif row.status == 'PRESENT' %}
+                    <span style="font-size:12px;color:var(--success);font-weight:700"><i class="fa-solid fa-check"></i> Done</span>
+                  {% else %}
+                    <span style="font-size:12px;color:var(--muted)">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="manualModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);backdrop-filter:blur(6px);z-index:100;align-items:center;justify-content:center;padding:20px">
+  <div class="card" style="max-width:480px;width:100%;padding:24px">
+    <h3 style="font-family:Space Grotesk,sans-serif">Confirm Manual Attendance</h3>
+    <p style="font-size:13px;color:var(--muted);margin-top:6px">Mark <b id="modalName">—</b> as <span class="badge badge-success">PRESENT / MANUAL</span>?</p>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" style="flex:1" id="confirmManualBtn"><i class="fa-solid fa-check"></i> Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const sessionId="{{ session.id }}";
+const expiresAt=new Date("{{ session.expires_at|date:'c' }}").getTime();
+const createdAt=new Date("{{ session.created_at|date:'c' }}").getTime();
+const totalStudents={{ total }};
+let pendingStudentId=null, isExpired=false;
+let teacherStream=null;
+
+function copyPayload(){navigator.clipboard.writeText(document.getElementById('payloadBox').textContent.trim());const b=document.getElementById('serverStatus');const old=b.innerHTML;b.innerHTML='<i class="fa-solid fa-check"></i> Copied!';setTimeout(()=>b.innerHTML=old,1500)}
+function toggleFullscreen(){const el=document.documentElement; if(!document.fullscreenElement) el.requestFullscreen(); else document.exitFullscreen();}
+function openModal(sid,name){pendingStudentId=sid;document.getElementById('modalName').textContent=name;document.getElementById('manualModal').style.display='flex'}
+function closeModal(){document.getElementById('manualModal').style.display='none';pendingStudentId=null}
+document.getElementById('manualModal').addEventListener('click',e=>{if(e.target.id==='manualModal')closeModal()})
+document.querySelectorAll('.manualBtn').forEach(b=>b.addEventListener('click',()=>openModal(b.dataset.student,b.dataset.name)))
+document.getElementById('confirmManualBtn').addEventListener('click',async()=>{
+  if(!pendingStudentId) return; const btn=document.getElementById('confirmManualBtn');btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Marking…';btn.disabled=true;
+  const fd=new FormData();fd.append('student_id',pendingStudentId);fd.append('confirm','true');fd.append('csrfmiddlewaretoken','{{ csrf_token }}');
+  try{
+    const res=await fetch(`/attendance/session/${sessionId}/manual/`,{method:'POST',body:fd});const data=await res.json();
+    if(res.ok){
+      closeModal();
+      const row=document.querySelector(`tr[data-student="${pendingStudentId}"]`);
+      if(row){
+        row.querySelector('td:nth-child(3)').innerHTML='<span class="badge badge-success"><i class="fa-solid fa-circle-check"></i> PRESENT</span>';
+        row.querySelector('td:nth-child(4)').innerHTML='<span class="badge badge-primary"><i class="fa-solid fa-hand"></i> Manual</span>';
+        row.querySelector('td:nth-child(5)').textContent=new Date().toLocaleTimeString();
+        row.querySelector('td:nth-child(6)').innerHTML='<span style="font-size:12px;color:var(--success);font-weight:700"><i class="fa-solid fa-check"></i> Done</span>';
+      }
+      document.getElementById('presentCount').textContent=parseInt(document.getElementById('presentCount').textContent)+1;
+    } else alert(data.error||'Failed');
+  }catch(e){alert('Network error')}
+  btn.innerHTML='<i class="fa-solid fa-check"></i> Confirm';btn.disabled=false;
+});
+
+// Face toggle — only teacher
+async function toggleFace(){
+  const sw=document.getElementById('faceSwitch');
+  const isOn=sw.classList.contains('on');
+  const newVal=!isOn;
+  sw.classList.toggle('on', newVal);
+  document.getElementById('faceToggleLabel').textContent=newVal?'ON':'OFF';
+  document.getElementById('faceToggleLabel').style.color=newVal?'#0f172a':'var(--muted)';
+  document.getElementById('faceBadge').innerHTML='<i class="fa-solid fa-camera"></i> Face '+(newVal?'ON':'OFF');
+  document.getElementById('faceBadge').className='badge '+(newVal?'badge-dark':'badge-primary');
+  document.getElementById('faceQueueCard').style.display=newVal?'block':'none';
+  // API
+  try{
+    const res=await fetch(`/attendance/session/${sessionId}/toggle-face/`,{method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':'{{ csrf_token }}'}, body:JSON.stringify({enabled:newVal})});
+    const data=await res.json();
+    if(res.ok) addFeed(`Face verification ${newVal?'ENABLED':'DISABLED'} — teacher toggle`, 'manual');
+  }catch(e){}
+}
+
+// Teacher camera — uses TEACHER's camera per spec
+async function toggleTeacherCamera(){
+  const btn=document.getElementById('teacherCameraBtn'), wrap=document.getElementById('teacherCamWrap'), video=document.getElementById('teacherVideo'), status=document.getElementById('teacherCamStatus'), text=document.getElementById('teacherCamText');
+  if(teacherStream){
+    teacherStream.getTracks().forEach(t=>t.stop()); teacherStream=null; wrap.style.display='none'; status.textContent='Camera off'; status.className='badge badge-primary'; text.textContent='Start My Camera'; return;
+  }
+  try{
+    teacherStream=await navigator.mediaDevices.getUserMedia({video:true});
+    video.srcObject=teacherStream; await video.play();
+    wrap.style.display='block'; status.textContent='Camera on — Face scan active'; status.className='badge badge-success'; text.textContent='Stop Camera';
+    // simple face detection hint using FaceDetector if available
+    if('FaceDetector' in window){
+      const detector=new FaceDetector({fastMode:true});
+      const faceStatus=document.getElementById('teacherFaceStatus');
+      setInterval(async()=>{
+        try{
+          const faces=await detector.detect(video);
+          faceStatus.textContent=faces.length? `Face detected (${faces.length}) — you are verified` : 'No face — position yourself';
+          faceStatus.style.color=faces.length?'#059669':'#dc2626';
+        }catch(e){}
+      }, 1000);
+    } else {
+      document.getElementById('teacherFaceStatus').textContent='Camera active — face verification enabled (teacher)';
+    }
+  }catch(e){
+    alert('Camera denied — allow camera to use face verification');
+  }
+}
+
+// Teacher location capture
+async function captureTeacherLocation(){
+  const badge=document.getElementById('locBadge'), tLat=document.getElementById('tLat'), tLng=document.getElementById('tLng'), topBadge=document.getElementById('teacherLocBadge');
+  if(!navigator.geolocation){alert('Geolocation not supported');return}
+  badge.textContent='Capturing…';badge.className='badge badge-warning';
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    const lat=pos.coords.latitude, lng=pos.coords.longitude;
+    try{
+      const res=await fetch(`/attendance/session/${sessionId}/teacher-location/`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':'{{ csrf_token }}'},body:JSON.stringify({latitude:lat,longitude:lng})});
+      const data=await res.json();
+      if(res.ok){
+        tLat.textContent=lat.toFixed(6); tLng.textContent=lng.toFixed(6);
+        badge.textContent='Set ✓';badge.className='badge badge-success';
+        topBadge.innerHTML='<i class="fa-solid fa-location-crosshairs"></i> Teacher located';
+        topBadge.className='badge badge-success';
+        addFeed(`Teacher location updated: ${lat.toFixed(4)}, ${lng.toFixed(4)}`, 'manual');
+      } else alert(data.error);
+    }catch(e){alert('Failed to update location')}
+  }, err=>{
+    let m='Denied'; if(err.code===1) m='Permission denied — enable location';
+    badge.textContent=m;badge.className='badge badge-danger'; alert(m);
+  }, {enableHighAccuracy:true, timeout:10000});
+}
+
+// Countdown
+function updateCountdown(){
+  const now=Date.now(), diff=expiresAt-now, total=expiresAt-createdAt, pct=Math.max(0,Math.min(100,(diff/total)*100));
+  document.getElementById('progressBar').style.width=pct+'%';
+  if(diff<=0){
+    if(!isExpired){isExpired=true;document.getElementById('countdown').textContent='Expired';document.getElementById('countdown').style.color='#fbbf24';document.getElementById('progressBar').style.background='#f59e0b';document.getElementById('statusBadge').textContent='EXPIRED';document.getElementById('statusBadge').className='badge badge-warning';document.getElementById('expiredNotice').style.display='block'}
+  } else {
+    document.getElementById('countdown').textContent=Math.ceil(diff/1000)+'s';
+    if(diff<10000) document.getElementById('progressBar').style.background='linear-gradient(90deg,#f59e0b,#ef4444)';
+  }
+}
+setInterval(updateCountdown,200);updateCountdown();
+
+function addFeed(text,type='qr'){
+  const feed=document.getElementById('liveFeed');const pill=document.createElement('span');pill.className='badge '+(type==='qr'?'badge-success':'badge-primary');pill.style.padding='8px 12px';pill.innerHTML='<i class="fa-solid fa-circle-check"></i> '+text;feed.prepend(pill);if(feed.children.length>6) feed.lastChild.remove();
+}
+
+async function pollStatus(){
+  try{
+    const res=await fetch(`/attendance/session/${sessionId}/status/`); if(!res.ok) return; const data=await res.json();
+    document.getElementById('presentCount').textContent=data.present_count;
+    document.getElementById('presentText').textContent=data.present_count+' / '+data.total;
+    document.getElementById('presentProgress').style.width=Math.round(data.present_count/data.total*100)+'%';
+    document.getElementById('pctText').textContent=Math.round(data.present_count/data.total*100)+'% present';
+    if(data.status!==document.getElementById('statusBadge').textContent){
+      document.getElementById('statusBadge').textContent=data.status;
+      document.getElementById('statusBadge').className='badge '+(data.status==='OPEN'?'badge-success':data.status==='EXPIRED'?'badge-warning':'badge-dark');
+    }
+    // denials
+    const denialsList=document.getElementById('denialsList');
+    if(data.denials){
+      document.getElementById('denialCount').textContent=data.denials_count;
+      if(data.denials.length){
+        denialsList.innerHTML=data.denials.map(d=>`
+          <div style="display:flex;gap:12px;align-items:center;padding:10px 12px;background:white;border:1px solid #fecaca;border-radius:12px">
+            <div style="width:36px;height:36px;border-radius:10px;background:#fef2f2;color:#dc2626;display:grid;place-items:center;font-weight:800">${d.username[0].toUpperCase()}</div>
+            <div style="flex:1"><b style="font-size:13px">${d.username} <span style="color:var(--muted);font-weight:400">• ${d.roll}</span></b><div style="font-size:11px;color:#991b1b"><i class="fa-solid fa-circle-xmark"></i> ${d.reason} • ${d.time}</div></div>
+            <span class="badge badge-danger">${d.reason}</span>
+          </div>`).join('');
+      } else {
+        denialsList.innerHTML='<div style="text-align:center;padding:16px;color:#059669;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:12px"><i class="fa-solid fa-circle-check"></i> No denials</div>';
+      }
+    }
+    // face toggle sync
+    const faceBadge=document.getElementById('faceBadge');
+    if(data.face_enabled !== undefined){
+      const enabled=data.face_enabled;
+      faceBadge.innerHTML='<i class="fa-solid fa-camera"></i> Face '+(enabled?'ON':'OFF');
+      faceBadge.className='badge '+(enabled?'badge-dark':'badge-primary');
+      document.getElementById('faceSwitch').classList.toggle('on', enabled);
+      document.getElementById('faceToggleLabel').textContent=enabled?'ON':'OFF';
+      document.getElementById('faceQueueCard').style.display=enabled?'block':'none';
+    }
+    if(data.teacher_location_set){
+      document.getElementById('tLat').textContent=data.teacher_lat.toFixed(6);
+      document.getElementById('tLng').textContent=data.teacher_lng.toFixed(6);
+      document.getElementById('locBadge').textContent='Set ✓';
+      document.getElementById('locBadge').className='badge badge-success';
+    }
+    data.present_list.forEach(p=>{
+      const row=document.querySelector(`tr[data-username="${p.username}"]`);
+      if(row && row.querySelector('td:nth-child(3)').textContent.includes('PENDING')){
+        row.querySelector('td:nth-child(3)').innerHTML='<span class="badge badge-success"><i class="fa-solid fa-circle-check"></i> PRESENT</span>';
+        row.querySelector('td:nth-child(4)').innerHTML=`<span class="badge badge-success"><i class="fa-solid fa-ruler"></i> ${p.distance?Math.round(p.distance)+'m':'—'}</span> ${p.face?' <span class="badge badge-primary"><i class="fa-solid fa-camera"></i> Face</span>':''}`;
+        row.querySelector('td:nth-child(5)').textContent=p.time;
+        row.querySelector('td:nth-child(6)').innerHTML='<span style="font-size:12px;color:var(--success);font-weight:700"><i class="fa-solid fa-check"></i> Done</span>';
+        addFeed(`${p.username} • ${p.method} • ${p.time} • ${p.distance?Math.round(p.distance)+'m':''}`, 'qr');
+      }
+    });
+    // face queue polling (simple reload queue via status? we do full fetch via polling face images would need extra endpoint; here we just update count)
+    document.getElementById('faceQueueCount').textContent=data.face_queue_count;
+  }catch(e){}
+}
+setInterval(pollStatus,2000);pollStatus();
+
+let ws=null;
+try{
+  const proto=location.protocol==='https:'?'wss:':'ws:';
+  ws=new WebSocket(`${proto}//${location.host}/ws/attendance/${sessionId}/`);
+  ws.onopen=()=>document.getElementById('liveBadge').textContent='Live via WebSocket';
+  ws.onmessage=e=>{
+    const data=JSON.parse(e.data);
+    if(data.type==='attendance_update') pollStatus();
+    else if(data.type==='location_denied') {pollStatus(); addFeed(`${data.student} denied location • ${data.reason}`, 'manual');}
+    else if(data.type==='face_captured') pollStatus();
+    else pollStatus();
+  };
+  ws.onerror=()=>document.getElementById('liveBadge').textContent='Polling (WS fallback)';
+  ws.onclose=()=>document.getElementById('liveBadge').textContent='Polling (WS fallback)';
+}catch(e){document.getElementById('liveBadge').textContent='Polling'}
+</script>
+{% endblock %}

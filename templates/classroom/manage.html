@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Manage {{ classroom.code }} — SmartQR{% endblock %}
+{% block content %}
+<div style="display:flex;gap:12px;align-items:center;margin-bottom:16px">
+  <a href="{% url 'classroom:list' %}" class="btn btn-ghost btn-sm"><i class="fa-solid fa-arrow-left"></i> Classes</a>
+  <h1 style="font-family:Space Grotesk,sans-serif;font-size:22px">{{ classroom.code }} — {{ classroom.name }}-{{ classroom.section }}</h1>
+  <span class="badge badge-dark">{{ enrollments|length }} enrolled</span>
+</div>
+
+<div class="grid grid-2">
+  <div class="card card-pad">
+    <h3 style="font-family:Space Grotesk,sans-serif"><i class="fa-solid fa-user-plus" style="color:var(--primary)"></i> Enroll Student</h3>
+    <form method="post" style="margin-top:14px">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="enroll">
+      <label class="label">Username (must be a student account)</label>
+      <input name="username" class="input" placeholder="student01" required list="studentsList">
+      <datalist id="studentsList">
+        {% for s in available_students %}<option value="{{ s.username }}">{% endfor %}
+      </datalist>
+      <label class="label" style="margin-top:12px">Roll Number</label>
+      <input name="roll_number" class="input" placeholder="22CSE001 (optional, defaults to student's roll)">
+      <button class="btn btn-primary" style="width:100%;margin-top:14px"><i class="fa-solid fa-plus"></i> Enroll</button>
+    </form>
+    <div style="margin-top:14px;background:#f8fafc;border:1px solid var(--border);border-radius:12px;padding:12px">
+      <div style="font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Available Students (not yet enrolled)</div>
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+        {% for s in available_students %}
+          <span class="badge" style="background:white;border:1px solid var(--border)">{{ s.username }} {% if s.roll_number %}({{ s.roll_number }}){% endif %}</span>
+        {% empty %}
+          <span style="font-size:13px;color:var(--muted)">All students are already enrolled.</span>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="overflow:hidden">
+    <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">
+      <h3 style="font-family:Space Grotesk,sans-serif">Enrolled Students</h3>
+      <span class="badge badge-primary">{{ enrollments|length }} total</span>
+    </div>
+    <div style="overflow:auto;max-height:560px">
+      <table class="table">
+        <thead><tr><th>Student</th><th>Roll</th><th>Enrolled</th><th>Action</th></tr></thead>
+        <tbody>
+          {% for e in enrollments %}
+            <tr>
+              <td><b>{{ e.student.username }}</b><div style="font-size:11px;color:var(--muted)">{{ e.student.email }}</div></td>
+              <td>{{ e.roll_number|default:"—" }}</td>
+              <td style="font-size:12px;color:var(--muted)">{{ e.enrolled_at|date:"M d, Y" }}</td>
+              <td>
+                <form method="post" onsubmit="return confirm('Remove {{ e.student.username }}?')">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="remove">
+                  <input type="hidden" name="enroll_id" value="{{ e.id }}">
+                  <button class="btn btn-ghost btn-sm" style="color:var(--danger);border-color:#fecaca"><i class="fa-solid fa-trash"></i></button>
+                </form>
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4" style="text-align:center;padding:24px;color:var(--muted)">No students enrolled yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

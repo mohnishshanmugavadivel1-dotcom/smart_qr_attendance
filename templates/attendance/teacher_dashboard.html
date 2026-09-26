@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}Teacher Dashboard — SmartQR{% endblock %}
+{% block content %}
+<div class="hero card" style="padding:28px;margin-bottom:20px">
+  <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;position:relative;z-index:1">
+    <div style="flex:1;min-width:280px">
+      <div class="badge" style="background:rgba(255,255,255,.15);color:white;border:1px solid rgba(255,255,255,.2)"><span class="status-dot pulse" style="background:#22c55e"></span> Teacher Workspace • Live + Geofence + Face</div>
+      <h1 style="font-family:Space Grotesk,sans-serif;font-size:30px;letter-spacing:-.03em;margin-top:12px;line-height:1.1">Good {{ user.username|capfirst }},<br>take attendance — secured.</h1>
+      <p style="opacity:.85;margin-top:10px;font-size:14px;line-height:1.6;max-width:560px">30s QR + 50m geofence (mandatory location) + optional face verification via <b>your camera</b>. Students outside radius or denying location are blocked & reported to you.</p>
+      <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+        <a href="{% url 'attendance:analytics' %}" class="btn btn-ghost" style="background:white;color:var(--dark)"><i class="fa-solid fa-chart-line"></i> Analytics</a>
+        <a href="{% url 'attendance:teacher_history' %}" class="btn" style="background:rgba(255,255,255,.12);color:white;border:1px solid rgba(255,255,255,.2)"><i class="fa-solid fa-clock-rotate-left"></i> History & CSV</a>
+      </div>
+    </div>
+    <div style="width:380px;max-width:100%;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:20px;padding:18px;backdrop-filter:blur(10px)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;opacity:.7;font-weight:800">Today's Pulse</span>
+        <span class="badge" style="background:#22c55e;color:white"><i class="fa-solid fa-bolt"></i> Realtime</span>
+      </div>
+      <div class="grid grid-3" style="margin-top:14px;text-align:center">
+        <div style="background:rgba(255,255,255,.08);border-radius:14px;padding:14px"><div style="font-family:Space Grotesk,sans-serif;font-size:26px;font-weight:800">{{ total_sessions }}</div><div style="font-size:11px;opacity:.7;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Finalized</div></div>
+        <div style="background:rgba(255,255,255,.08);border-radius:14px;padding:14px"><div style="font-family:Space Grotesk,sans-serif;font-size:26px;font-weight:800">{{ total_students }}</div><div style="font-size:11px;opacity:.7;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Students</div></div>
+        <div style="background:rgba(255,255,255,.08);border-radius:14px;padding:14px"><div style="font-family:Space Grotesk,sans-serif;font-size:26px;font-weight:800">{{ today_present }}</div><div style="font-size:11px;opacity:.7;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Present Today</div></div>
+      </div>
+      <div style="margin-top:14px;background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:10px 12px;display:flex;gap:10px;align-items:center">
+        <div style="width:32px;height:32px;border-radius:10px;background:#ef4444;color:white;display:grid;place-items:center"><i class="fa-solid fa-location-dot"></i></div>
+        <div style="font-size:12px;line-height:1.4"><b style="color:#991b1b">Location Required:</b> <span style="color:#7f1d1d">Students denying location are frozen & reported below.</span></div>
+      </div>
+      {% if recent_denials %}
+        <div style="margin-top:10px;background:rgba(255,255,255,.95);border-radius:12px;padding:10px 12px">
+          <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:800;color:#991b1b"><i class="fa-solid fa-triangle-exclamation"></i> Location Denied — Recent</div>
+          <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
+            {% for d in recent_denials|slice:":4" %}
+              <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 10px">
+                <b>{{ d.student.username }} ({{ d.student.roll_number|default:"—" }})</b>
+                <span style="color:#92400e">{{ d.session.classroom.code }} • {{ d.reason }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <!-- CREATE SESSION UPGRADED -->
+  <div class="card shine" style="padding:0">
+    <div style="padding:22px 24px 0">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#2563eb,#4f46e5);color:white;display:grid;place-items:center"><i class="fa-solid fa-qrcode"></i></div>
+        <div>
+          <h3 style="font-family:Space Grotesk,sans-serif;font-size:18px">Create Attendance Session</h3>
+          <p style="font-size:12px;color:var(--muted)">QR + 50m Geofence (mandatory) + Optional Face via your camera</p>
+        </div>
+      </div>
+    </div>
+    {% if active_session %}
+      <div style="margin:18px 24px;background:#fffbeb;border:1px solid #fde68a;border-radius:14px;padding:14px;display:flex;gap:12px;align-items:center">
+        <div style="width:36px;height:36px;border-radius:10px;background:#f59e0b;color:white;display:grid;place-items:center"><i class="fa-solid fa-triangle-exclamation"></i></div>
+        <div style="flex:1">
+          <b style="font-size:13px">Active session running</b>
+          <div style="font-size:12px;color:#92400e">{{ active_session.classroom.code }} • {{ active_session.subject.name }} • <span id="activeTimer">—</span> • {{ active_session.allowed_radius_meters }}m • {% if active_session.face_verification_enabled %}<span class="badge badge-dark"><i class="fa-solid fa-camera"></i> Face ON</span>{% else %}<span class="badge" style="background:#f1f5f9">Face OFF</span>{% endif %}</div>
+        </div>
+        <a href="{% url 'attendance:teacher_session' active_session.id %}" class="btn btn-dark btn-sm">Open <i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+      </div>
+    {% endif %}
+    <form id="createSessionForm" method="post" action="{% url 'attendance:create_session' %}" style="padding:0 24px 24px">
+      {% csrf_token %}
+      <input type="hidden" name="teacher_latitude" id="teacherLat">
+      <input type="hidden" name="teacher_longitude" id="teacherLng">
+      <div style="margin-top:16px">
+        <label class="label">Classroom</label>
+        <select name="classroom" class="select" required>
+          <option value="">Select class — e.g., CSE-A</option>
+          {% for c in classes %}
+            <option value="{{ c.id }}">{{ c.code }} — {{ c.name }}-{{ c.section }} ({{ c.student_count }} students)</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="margin-top:14px">
+        <label class="label">Subject</label>
+        <select name="subject" class="select" required>
+          <option value="">Select subject — e.g., Data Structures</option>
+          {% for s in subjects %}
+            <option value="{{ s.id }}">{{ s.code }} — {{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      
+      <div class="grid grid-2" style="margin-top:14px;gap:12px">
+        <label style="cursor:pointer;background:#f8fafc;border:1px solid var(--border);border-radius:12px;padding:12px;display:flex;gap:10px;align-items:center">
+          <input type="checkbox" name="face_verification_enabled" id="faceCheck" style="width:18px;height:18px;accent-color:#2563eb">
+          <div>
+            <b style="font-size:13px"><i class="fa-solid fa-camera" style="color:var(--primary)"></i> Face Verification</b>
+            <div style="font-size:11px;color:var(--muted)">Uses <b>your</b> camera — you control ON/OFF</div>
+          </div>
+        </label>
+        <div>
+          <label class="label" style="margin:0 0 6px">Radius (meters)</label>
+          <select name="allowed_radius_meters" class="select">
+            <option value="30">30 m — Tight (lab)</option>
+            <option value="50" selected>50 m — Classroom (default)</option>
+            <option value="100">100 m — Hall</option>
+            <option value="200">200 m — Building</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="margin-top:14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <b style="font-size:12px;color:#1e40af"><i class="fa-solid fa-location-crosshairs"></i> Your Location (Teacher) — Source of Truth</b>
+          <span class="badge badge-primary" id="locStatus"><i class="fa-solid fa-circle-notch fa-spin"></i> Capturing…</span>
+        </div>
+        <div style="font-size:11px;color:#1e40af;margin-top:6px">Students must be within <b>radius</b> of your laptop/mobile. We capture your location now — grant permission.</div>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <div style="flex:1;background:white;border:1px solid #bfdbfe;border-radius:10px;padding:8px 10px;font-size:12px"><b>Lat:</b> <span id="latVal">—</span> <b style="margin-left:10px">Lng:</b> <span id="lngVal">—</span></div>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="captureTeacherLocation()"><i class="fa-solid fa-rotate"></i> Recapture</button>
+        </div>
+        <div style="font-size:11px;color:#64748b;margin-top:6px"><i class="fa-solid fa-shield-halved"></i> Location is stored server-side with session and used for Haversine check. Without your location, students cannot be marked present.</div>
+      </div>
+
+      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:18px;padding:14px;font-size:15px" id="createBtn">
+        <i class="fa-solid fa-wand-magic-sparkles"></i> Generate 30s QR + Geofence
+      </button>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <span class="badge badge-primary"><i class="fa-solid fa-location-dot"></i> 50m mandatory</span>
+        <span class="badge badge-dark"><i class="fa-solid fa-camera"></i> Teacher camera (toggle)</span>
+        <span class="badge badge-success"><i class="fa-solid fa-bolt"></i> WebSocket live</span>
+      </div>
+    </form>
+  </div>
+
+  <!-- RECENT SESSIONS -->
+  <div class="card" style="padding:22px 24px">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h3 style="font-family:Space Grotesk,sans-serif;font-size:18px;display:flex;gap:10px;align-items:center"><i class="fa-solid fa-layer-group" style="color:var(--primary)"></i> Recent Sessions</h3>
+      <a href="{% url 'attendance:teacher_history' %}" class="btn btn-ghost btn-sm">View all</a>
+    </div>
+    {% if sessions %}
+      <div style="margin-top:16px;display:flex;flex-direction:column;gap:12px">
+        {% for s in sessions %}
+          <a href="{% url 'attendance:teacher_session' s.id %}" style="display:flex;gap:14px;align-items:center;padding:14px;border:1px solid var(--border);border-radius:14px;transition:.15s;background:white">
+            <div style="width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:white;background:{% if s.status == 'OPEN' %}#10b981{% elif s.status == 'EXPIRED' %}#f59e0b{% else %}#0f172a{% endif %}"><i class="fa-solid {% if s.status == 'OPEN' %}fa-signal{% elif s.status == 'EXPIRED' %}fa-clock{% else %}fa-lock{% endif %}"></i></div>
+            <div style="flex:1">
+              <b style="font-size:14px">{{ s.classroom.code }} • {{ s.subject.code }}</b>
+              <div style="font-size:12px;color:var(--muted)">{{ s.created_at|date:"M d, Y • H:i" }} • {{ s.allowed_radius_meters }}m • {% if s.face_verification_enabled %}<span style="color:var(--primary);font-weight:700"><i class="fa-solid fa-camera"></i> Face</span>{% else %}No Face{% endif %} {% if s.teacher_latitude %}• <i class="fa-solid fa-location-dot" style="color:#10b981"></i> Located{% endif %}</div>
+            </div>
+            <span class="badge {% if s.status == 'OPEN' %}badge-success{% elif s.status == 'EXPIRED' %}badge-warning{% else %}badge-dark{% endif %}">{{ s.status }}</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div style="text-align:center;padding:40px 20px;color:var(--muted)">
+        <div style="width:64px;height:64px;border-radius:16px;background:#f1f5f9;display:grid;place-items:center;margin:0 auto 12px;font-size:20px"><i class="fa-solid fa-inbox"></i></div>
+        <b>No sessions yet</b><div style="font-size:13px;margin-top:4px">Create your first QR and watch live geofence + face flow.</div>
+      </div>
+    {% endif %}
+    <div style="margin-top:14px;background:#f8fafc;border:1px solid var(--border);border-radius:12px;padding:12px;font-size:12px;color:var(--muted)"><i class="fa-solid fa-circle-info"></i> <b>Location deniers</b> appear in real-time on session page and in the denials list below.</div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:20px;padding:16px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+  <span class="status-dot pulse" style="background:var(--success)"></span>
+  <span class="badge badge-success">50m mandatory</span>
+  <span class="badge badge-primary"><i class="fa-solid fa-heart-pulse"></i> Heartbeat 3s</span>
+  <span class="badge badge-dark"><i class="fa-solid fa-camera"></i> Teacher camera toggle</span>
+  <span class="badge" style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b"><i class="fa-solid fa-location-dot"></i> Frozen if location off & reported</span>
+</div>
+
+<script>
+function captureTeacherLocation(){
+  const status=document.getElementById('locStatus');
+  status.innerHTML='<i class="fa-solid fa-circle-notch fa-spin"></i> Capturing…';
+  status.className='badge badge-warning';
+  if(!navigator.geolocation){
+    status.textContent='Geolocation not supported';
+    status.className='badge badge-danger';
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(pos=>{
+    const lat=pos.coords.latitude.toFixed(6), lng=pos.coords.longitude.toFixed(6);
+    document.getElementById('latVal').textContent=lat;
+    document.getElementById('lngVal').textContent=lng;
+    document.getElementById('teacherLat').value=lat;
+    document.getElementById('teacherLng').value=lng;
+    status.innerHTML='<i class="fa-solid fa-circle-check"></i> Location captured';
+    status.className='badge badge-success';
+  }, err=>{
+    let msg='Denied';
+    if(err.code===1) msg='Permission denied — enable location';
+    else if(err.code===2) msg='Unavailable';
+    else if(err.code===3) msg='Timeout';
+    status.textContent=msg;
+    status.className='badge badge-danger';
+    document.getElementById('latVal').textContent='—';
+    document.getElementById('lngVal').textContent='—';
+  }, {enableHighAccuracy:true, timeout:10000, maximumAge:0});
+}
+captureTeacherLocation();
+
+{% if active_session %}
+(function(){
+  const expires = new Date("{{ active_session.expires_at|date:'c' }}").getTime();
+  const el = document.getElementById('activeTimer');
+  function tick(){
+    const diff = expires - Date.now();
+    if(diff<=0){ el.textContent="Expired — recreate"; el.style.color="#dc2626"; return;}
+    el.textContent = Math.ceil(diff/1000)+"s remaining";
+  }
+  setInterval(tick, 300); tick();
+})();
+{% endif %}
+document.getElementById('createSessionForm')?.addEventListener('submit', function(e){
+  const lat=document.getElementById('teacherLat').value, lng=document.getElementById('teacherLng').value;
+  if(!lat || !lng){
+    if(!confirm('Teacher location not captured yet. Students will be blocked until you capture it on the session page. Create anyway?')) e.preventDefault();
+  }
+  const btn=document.getElementById('createBtn');
+  btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Creating…';
+  btn.disabled=true;
+});
+</script>
+{% endblock %}

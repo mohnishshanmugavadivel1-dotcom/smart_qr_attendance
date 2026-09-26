@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Student Dashboard — SmartQR{% endblock %}
+{% block content %}
+<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-bottom:18px">
+  <div>
+    <h1 style="font-family:Space Grotesk,sans-serif;font-size:26px;letter-spacing:-.02em">Hello, {{ user.username }} 👋</h1>
+    <p style="color:var(--muted);font-size:14px">Roll: <b style="color:var(--dark)">{{ user.roll_number|default:"—" }}</b> • Enrolled in {{ enrollments|length }} class{{ enrollments|length|pluralize }}</p>
+  </div>
+  <div style="margin-left:auto;display:flex;gap:10px">
+    <a href="{% url 'attendance:verify_page' %}" class="btn btn-primary"><i class="fa-solid fa-qrcode"></i> Scan Attendance</a>
+    <a href="{% url 'attendance:student_history' %}" class="btn btn-ghost"><i class="fa-solid fa-clock-rotate-left"></i> My History</a>
+  </div>
+</div>
+
+<div class="grid grid-3">
+  <div class="card card-pad" style="background:linear-gradient(135deg,#0f172a,#1e293b);color:white;position:relative;overflow:hidden">
+    <div style="position:absolute;inset:0;background:radial-gradient(400px 200px at 80% 0%, rgba(99,102,241,.35), transparent 60%)"></div>
+    <div style="position:relative">
+      <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;opacity:.7;font-weight:800">Overall Attendance</div>
+      <div style="display:flex;gap:16px;align-items:center;margin-top:12px">
+        <div style="width:84px;height:84px;border-radius:50%;background:conic-gradient(#22c55e {{ percentage }}%, rgba(255,255,255,.12) 0);display:grid;place-items:center;padding:6px">
+          <div style="width:72px;height:72px;border-radius:50%;background:#0f172a;display:grid;place-items:center;font-family:Space Grotesk,sans-serif;font-size:18px;font-weight:800">{{ percentage }}%</div>
+        </div>
+        <div>
+          <div style="font-size:28px;font-family:Space Grotesk,sans-serif;font-weight:800">{{ present_count }}/{{ total_closed }}</div>
+          <div style="font-size:12px;opacity:.7">sessions present / total finalized</div>
+          <div style="margin-top:6px" class="badge {% if percentage >= 75 %}badge-success{% elif percentage >= 50 %}badge-warning{% else %}badge-danger{% endif %}">{% if percentage >= 75 %}<i class="fa-solid fa-circle-check"></i> Good standing{% elif percentage >= 50 %}<i class="fa-solid fa-triangle-exclamation"></i> At risk{% else %}<i class="fa-solid fa-circle-xmark"></i> Critical{% endif %}</div>
+        </div>
+      </div>
+      <div class="progress" style="margin-top:14px;background:rgba(255,255,255,.15)"><span style="width:{{ percentage }}%;background:#22c55e"></span></div>
+      <div style="font-size:11px;opacity:.6;margin-top:6px">Threshold 75% • Low-attendance students are highlighted for teachers.</div>
+    </div>
+  </div>
+
+  <div class="card card-pad">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h3 style="font-family:Space Grotesk,sans-serif">Active Sessions</h3>
+      <span class="badge badge-success"><span class="status-dot pulse" style="background:#10b981"></span> Live</span>
+    </div>
+    {% if active_sessions %}
+      <div style="margin-top:14px;display:flex;flex-direction:column;gap:12px">
+        {% for s in active_sessions %}
+          <div style="border:1px solid var(--border);border-radius:14px;padding:14px;background:linear-gradient(180deg,#ffffff,#f8fafc)">
+            <div style="display:flex;gap:12px;align-items:center">
+              <div style="width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#2563eb,#06b6d4);color:white;display:grid;place-items:center"><i class="fa-solid fa-qrcode"></i></div>
+              <div style="flex:1">
+                <b style="font-size:14px">{{ s.classroom.code }} • {{ s.subject.name }}</b>
+                <div style="font-size:12px;color:var(--muted)">By {{ s.teacher.username }} • {{ s.created_at|timesince }} ago • Expires {{ s.expires_at|time:"H:i:s" }}</div>
+              </div>
+              <span class="badge badge-success">OPEN</span>
+            </div>
+            <a href="{% url 'attendance:verify_page' %}?session={{ s.token }}" class="btn btn-primary" style="width:100%;margin-top:12px"><i class="fa-solid fa-bolt"></i> Start Verification</a>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div style="text-align:center;padding:28px 16px;color:var(--muted)">
+        <div style="width:56px;height:56px;border-radius:14px;background:#f1f5f9;display:grid;place-items:center;margin:0 auto 10px"><i class="fa-solid fa-satellite-dish"></i></div>
+        <b>No active sessions</b>
+        <div style="font-size:13px;margin-top:4px">When your teacher creates a QR, it will appear here instantly.</div>
+        <a href="{% url 'attendance:verify_page' %}" class="btn btn-ghost btn-sm" style="margin-top:12px"><i class="fa-solid fa-qrcode"></i> Go to Scanner</a>
+      </div>
+    {% endif %}
+    <div style="margin-top:12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:10px 12px;font-size:12px;color:#1e40af"><i class="fa-solid fa-circle-info"></i> You must be <b>enrolled</b> in the class to be eligible. Identity comes from your login — not client-submitted ID.</div>
+  </div>
+
+  <div class="card card-pad">
+    <h3 style="font-family:Space Grotesk,sans-serif">Your Enrollments</h3>
+    {% if enrollments %}
+      <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
+        {% for e in enrollments %}
+          <div style="display:flex;gap:12px;align-items:center;padding:12px;border:1px solid var(--border);border-radius:12px;background:white">
+            <div style="width:40px;height:40px;border-radius:10px;background:#f1f5f9;display:grid;place-items:center;color:var(--primary)"><i class="fa-solid fa-school"></i></div>
+            <div style="flex:1">
+              <b style="font-size:14px">{{ e.classroom.code }}</b>
+              <div style="font-size:12px;color:var(--muted)">{{ e.classroom.name }}-{{ e.classroom.section }} • Roll {{ e.roll_number|default:"—" }}</div>
+            </div>
+            <span class="badge badge-primary">Enrolled</span>
+          </div>
+        {% endfor %}
+      </div>
+      <a href="{% url 'classroom:list' %}" class="btn btn-ghost" style="width:100%;margin-top:12px"><i class="fa-solid fa-plus"></i> Browse / Join Classes</a>
+    {% else %}
+      <div style="text-align:center;padding:24px;color:var(--muted)">
+        <div style="font-size:13px">You are not enrolled in any class yet.</div>
+        <a href="{% url 'classroom:list' %}" class="btn btn-primary btn-sm" style="margin-top:10px">Browse Classes</a>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card" style="margin-top:18px;overflow:hidden">
+  <div style="padding:18px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">
+    <h3 style="font-family:Space Grotesk,sans-serif"><i class="fa-solid fa-clock-rotate-left" style="color:var(--primary)"></i> Recent Attendance</h3>
+    <a href="{% url 'attendance:student_history' %}" class="btn btn-ghost btn-sm">View all</a>
+  </div>
+  {% if history %}
+    <div style="overflow:auto">
+      <table class="table">
+        <thead><tr><th>Date</th><th>Class / Subject</th><th>Status</th><th>Method</th><th>Time</th></tr></thead>
+        <tbody>
+          {% for r in history %}
+            <tr>
+              <td style="font-weight:700">{{ r.session.created_at|date:"M d, Y" }}</td>
+              <td><b>{{ r.session.classroom.code }}</b> <span style="color:var(--muted)">• {{ r.session.subject.name }}</span></td>
+              <td><span class="badge {% if r.status == 'PRESENT' %}badge-success{% else %}badge-danger{% endif %}">{{ r.status }}</span></td>
+              <td><span class="badge {% if r.method == 'QR' %}badge-primary{% else %}badge-dark{% endif %}">{{ r.method }}</span></td>
+              <td style="font-size:13px;color:var(--muted)">{{ r.marked_at|date:"H:i:s" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div style="text-align:center;padding:32px;color:var(--muted)">No attendance records yet. Scan a QR to get your first PRESENT.</div>
+  {% endif %}
+</div>
+
+<div class="grid grid-2" style="margin-top:18px">
+  <div class="card card-pad" style="background:#f8fafc">
+    <h4 style="font-family:Space Grotesk,sans-serif"><i class="fa-solid fa-wand-magic-sparkles" style="color:var(--primary)"></i> How to get marked PRESENT</h4>
+    <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;font-size:13px;line-height:1.5">
+      <div style="display:flex;gap:10px"><span style="min-width:28px;height:28px;border-radius:999px;background:var(--dark);color:white;display:grid;place-items:center;font-weight:800;font-size:12px">1</span><span><b>Detect active session</b> — dashboard shows OPEN sessions for your enrolled classes.</span></div>
+      <div style="display:flex;gap:10px"><span style="min-width:28px;height:28px;border-radius:999px;background:var(--dark);color:white;display:grid;place-items:center;font-weight:800;font-size:12px">2</span><span><b>Start verification</b> — 10s preparation window begins (heartbeat every 3s).</span></div>
+      <div style="display:flex;gap:10px"><span style="min-width:28px;height:28px;border-radius:999px;background:var(--dark);color:white;display:grid;place-items:center;font-weight:800;font-size:12px">3</span><span><b>Scan QR</b> — server validates token, enrollment, expiry, duplicate.</span></div>
+      <div style="display:flex;gap:10px"><span style="min-width:28px;height:28px;border-radius:999px;background:linear-gradient(135deg,#2563eb,#06b6d4);color:white;display:grid;place-items:center;font-weight:800;font-size:12px">4</span><span><b>10s verification</b> — stay on page → SUCCESS → PRESENT (atomic, UNIQUE guard).</span></div>
+    </div>
+  </div>
+  <div class="card card-pad">
+    <h4 style="font-family:Space Grotesk,sans-serif"><i class="fa-solid fa-shield-halved" style="color:var(--success)"></i> Stay on the page</h4>
+    <p style="font-size:13px;color:var(--muted);margin-top:8px;line-height:1.6">Leaving the verification page (tab hide, minimize, back) during the 10s windows can mark your attempt <span class="badge badge-danger">INVALID</span> — you can retry immediately. Short network blips are tolerated, but prolonged heartbeat loss (~15s) also invalidates. Final PRESENT is terminal and never downgraded.</p>
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <span class="badge badge-primary"><i class="fa-solid fa-heart-pulse"></i> Heartbeat 3s</span>
+      <span class="badge badge-dark"><i class="fa-solid fa-fingerprint"></i> Identity = your login</span>
+    </div>
+  </div>
+</div>
+{% endblock %}

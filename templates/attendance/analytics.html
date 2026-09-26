@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Analytics — SmartQR{% endblock %}
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+{% block content %}
+<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+  <h1 style="font-family:Space Grotesk,sans-serif;font-size:24px"><i class="fa-solid fa-chart-line" style="color:var(--primary)"></i> Attendance Analytics</h1>
+  <span class="badge badge-dark">{{ total_finalized }} finalized sessions</span>
+  <form method="get" style="margin-left:auto;display:flex;gap:8px;align-items:center">
+    <select name="class" class="select" style="min-width:160px">
+      <option value="">All Classes</option>
+      {% for c in classrooms %}<option value="{{ c.code }}" {% if selected_class == c.code %}selected{% endif %}>{{ c.code }}</option>{% endfor %}
+    </select>
+    <input type="number" name="threshold" value="{{ threshold }}" min="0" max="100" class="input" style="width:110px" title="Low threshold %">
+    <button class="btn btn-primary btn-sm">Apply</button>
+  </form>
+</div>
+
+<div class="grid grid-4">
+  <div class="card card-pad" style="text-align:center">
+    <div style="width:44px;height:44px;border-radius:12px;background:#eff6ff;color:var(--primary);display:grid;place-items:center;margin:0 auto"><i class="fa-solid fa-users"></i></div>
+    <div style="font-family:Space Grotesk,sans-serif;font-size:28px;font-weight:800;margin-top:8px">{{ total_enrolled }}</div>
+    <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:800">Enrolled Students</div>
+  </div>
+  <div class="card card-pad" style="text-align:center">
+    <div style="width:44px;height:44px;border-radius:12px;background:#ecfdf5;color:#059669;display:grid;place-items:center;margin:0 auto"><i class="fa-solid fa-check"></i></div>
+    <div style="font-family:Space Grotesk,sans-serif;font-size:28px;font-weight:800;margin-top:8px">{{ present_total }}</div>
+    <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:800">Present Records</div>
+  </div>
+  <div class="card card-pad" style="text-align:center">
+    <div style="width:44px;height:44px;border-radius:12px;background:#fef2f2;color:#dc2626;display:grid;place-items:center;margin:0 auto"><i class="fa-solid fa-xmark"></i></div>
+    <div style="font-family:Space Grotesk,sans-serif;font-size:28px;font-weight:800;margin-top:8px">{{ absent_total }}</div>
+    <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:800">Absent Records</div>
+  </div>
+  <div class="card card-pad" style="text-align:center;background:linear-gradient(135deg,#0f172a,#1e293b);color:white">
+    <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.7;font-weight:800">Overall Attendance</div>
+    <div style="font-family:Space Grotesk,sans-serif;font-size:32px;font-weight:800;margin-top:6px">{{ overall_pct }}%</div>
+    <div class="progress" style="background:rgba(255,255,255,.15);margin-top:8px"><span style="width:{{ overall_pct }}%;background:#22c55e"></span></div>
+    <div style="font-size:11px;opacity:.6;margin-top:6px">Avg per student {{ avg_pct }}%</div>
+  </div>
+</div>
+
+<div class="grid grid-2" style="margin-top:18px">
+  <div class="card card-pad">
+    <h3 style="font-family:Space Grotesk,sans-serif">Attendance Distribution</h3>
+    <canvas id="distChart" height="220" style="margin-top:12px"></canvas>
+  </div>
+  <div class="card card-pad">
+    <h3 style="font-family:Space Grotesk,sans-serif">Low Attendance Alert <span class="badge badge-danger" style="margin-left:8px"><i class="fa-solid fa-triangle-exclamation"></i> &lt; {{ threshold }}%</span></h3>
+    {% if low_attendance %}
+      <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;max-height:300px;overflow:auto">
+        {% for s in low_attendance %}
+          <div style="display:flex;gap:12px;align-items:center;padding:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:12px">
+            <div style="width:40px;height:40px;border-radius:10px;background:#dc2626;color:white;display:grid;place-items:center;font-weight:800">{{ s.student.username|slice:":1"|upper }}</div>
+            <div style="flex:1">
+              <b>{{ s.student.username }}</b> <span style="color:var(--muted);font-size:12px">• {{ s.roll }} • {{ s.classroom }}</span>
+              <div style="font-size:12px">{{ s.present }}/{{ s.total }} • {{ s.pct }}%</div>
+            </div>
+            <span class="badge badge-danger">{{ s.pct }}%</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div style="text-align:center;padding:32px;color:var(--muted)">
+        <div style="width:56px;height:56px;border-radius:14px;background:#ecfdf5;color:#059669;display:grid;place-items:center;margin:0 auto 10px"><i class="fa-solid fa-circle-check"></i></div>
+        <b style="color:var(--dark)">No one below {{ threshold }}%</b><div style="font-size:13px">Great job — everyone is above threshold.</div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card" style="margin-top:18px;overflow:hidden">
+  <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">
+    <h3 style="font-family:Space Grotesk,sans-serif">Per-Student Breakdown</h3>
+    <span class="badge badge-primary">{{ student_stats|length }} students</span>
+  </div>
+  <div style="overflow:auto">
+    <table class="table">
+      <thead><tr><th>Student</th><th>Roll / Class</th><th>Present</th><th>Absent</th><th>Total</th><th>%</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for s in student_stats %}
+          <tr style="{% if s.is_low %}background:#fffbeb{% endif %}">
+            <td><b>{{ s.student.username }}</b><div style="font-size:11px;color:var(--muted)">{{ s.student.email }}</div></td>
+            <td>{{ s.roll }} • <span class="badge" style="background:#f8fafc;border:1px solid var(--border)">{{ s.classroom }}</span></td>
+            <td style="color:var(--success);font-weight:700">{{ s.present }}</td>
+            <td style="color:var(--danger);font-weight:700">{{ s.absent }}</td>
+            <td>{{ s.total }}</td>
+            <td>
+              <div style="display:flex;gap:8px;align-items:center">
+                <div class="progress" style="width:80px"><span style="width:{{ s.pct }}%;background:{% if s.is_low %}#ef4444{% else %}#10b981{% endif %}"></span></div>
+                <b>{{ s.pct }}%</b>
+              </div>
+            </td>
+            <td>{% if s.is_low %}<span class="badge badge-danger"><i class="fa-solid fa-triangle-exclamation"></i> Low</span>{% else %}<span class="badge badge-success"><i class="fa-solid fa-check"></i> OK</span>{% endif %}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">No finalized sessions yet — finalize a session to see analytics.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const ctx=document.getElementById('distChart').getContext('2d');
+const present={{ present_total|default:0 }};
+const absent={{ absent_total|default:0 }};
+new Chart(ctx, {
+  type:'doughnut',
+  data:{
+    labels:['Present','Absent'],
+    datasets:[{data:[present, absent], backgroundColor:['#10b981','#ef4444'], borderWidth:0}]
+  },
+  options:{
+    cutout:'68%',
+    plugins:{legend:{position:'bottom', labels:{usePointStyle:true, padding:18, font:{weight:700}}}},
+  }
+});
+</script>
+{% endblock %}

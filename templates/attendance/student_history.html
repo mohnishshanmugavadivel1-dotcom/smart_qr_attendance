@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}My History — SmartQR{% endblock %}
+{% block content %}
+<div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+  <h1 style="font-family:Space Grotesk,sans-serif;font-size:24px"><i class="fa-solid fa-list" style="color:var(--primary)" aria-hidden="true"></i> My Attendance History</h1>
+  <span class="badge badge-primary">{{ page_obj.paginator.count }} records</span>
+  <a href="{% url 'attendance:student_dashboard' %}" class="btn btn-ghost btn-sm" style="margin-left:auto">Dashboard</a>
+</div>
+<div class="card" style="overflow:hidden">
+  <div class="table-wrap" tabindex="0" role="region" aria-label="My attendance history">
+    <table class="table">
+      <caption style="position:absolute;left:-9999px">My attendance history</caption>
+      <thead><tr><th scope="col">Date</th><th scope="col">Class / Subject</th><th scope="col">Teacher</th><th scope="col">Status</th><th scope="col">Method</th><th scope="col">Distance</th><th scope="col">Face</th><th scope="col">Time</th></tr></thead>
+      <tbody>
+        {% for r in records %}
+          <tr>
+            <td style="font-weight:700">{{ r.session.created_at|date:"M d, Y" }}</td>
+            <td><b>{{ r.session.classroom.code }}</b> • {{ r.session.subject.name }}</td>
+            <td>{{ r.session.teacher.username }}</td>
+            <td><span class="badge {% if r.status == 'PRESENT' %}badge-success{% else %}badge-danger{% endif %}">{{ r.status }}</span></td>
+            <td><span class="badge {% if r.method == 'QR' %}badge-primary{% else %}badge-dark{% endif %}">{{ r.method }}</span></td>
+            <td style="font-size:12px">{{ r.distance_meters|default_if_none:"—"|floatformat:0 }}{% if r.distance_meters %}m{% endif %}</td>
+            <td>{% if r.face_verified %}<span class="badge badge-primary">Yes</span>{% else %}No{% endif %}</td>
+            <td style="font-size:12px;color:var(--muted)">{{ r.marked_at|date:"H:i:s • M d" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="8" style="text-align:center;padding:32px;color:var(--muted)">
+            <div style="width:48px;height:48px;border-radius:12px;background:#f1f5f9;display:grid;place-items:center;margin:0 auto 10px"><i class="fa-solid fa-inbox"></i></div>
+            No records yet — scan a QR to get started.<br><a href="{% url 'attendance:verify_page' %}" class="btn btn-primary btn-sm" style="margin-top:10px">Go to Scanner</a>
+          </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if page_obj.paginator.num_pages > 1 %}
+  <div style="padding:16px;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap" role="navigation" aria-label="Pagination">
+    {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}" class="btn btn-ghost btn-sm">Previous</a>{% endif %}
+    <span style="font-size:13px;color:var(--muted)">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}" class="btn btn-ghost btn-sm">Next</a>{% endif %}
+  </div>
+  {% endif %}
+</div>
+<div style="margin-top:12px" class="card card-pad">
+  <div style="font-size:13px;color:var(--muted)"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> Only final <b>PRESENT/ABSENT</b> records are shown. Temporary attempts (<code>OPEN</code>, <code>INVALID</code>) are not history. Location & face columns show verification snapshots.</div>
+</div>
+{% endblock %}

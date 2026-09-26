@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}History — SmartQR{% endblock %}
+{% block content %}
+<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+  <h1 style="font-family:Space Grotesk,sans-serif;font-size:24px"><i class="fa-solid fa-clock-rotate-left" style="color:var(--primary)" aria-hidden="true"></i> Attendance History</h1>
+  <span class="badge badge-primary" aria-live="polite">{{ page_obj.paginator.count }} records</span>
+  <a href="{% url 'attendance:export_csv' %}?{{ request.GET.urlencode }}" class="btn btn-dark btn-sm" style="margin-left:auto"><i class="fa-solid fa-file-csv" aria-hidden="true"></i> Export CSV (UTF-8 BOM)</a>
+  <a href="{% url 'attendance:analytics' %}" class="btn btn-ghost btn-sm"><i class="fa-solid fa-chart-line" aria-hidden="true"></i> Analytics</a>
+</div>
+
+<div class="card card-pad" style="margin-bottom:16px">
+  <form method="get" aria-label="Filter attendance">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+      <div>
+        <label for="filter_class" class="label">Class</label>
+        <select name="class" id="filter_class" class="select" style="min-width:160px">
+          <option value="">All classes</option>
+          {% for c in classes %}<option value="{{ c.code }}" {% if request.GET.class == c.code %}selected{% endif %}>{{ c.code }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="filter_subject" class="label">Subject</label>
+        <select name="subject" id="filter_subject" class="select" style="min-width:160px">
+          <option value="">All subjects</option>
+          {% for s in subjects %}<option value="{{ s.code }}" {% if request.GET.subject == s.code %}selected{% endif %}>{{ s.code }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="filter_date" class="label">Date</label>
+        <input type="date" name="date" id="filter_date" class="input" value="{{ request.GET.date }}">
+      </div>
+      <div>
+        <label for="filter_status" class="label">Status</label>
+        <select name="status" id="filter_status" class="select">
+          <option value="">All</option>
+          <option value="PRESENT" {% if request.GET.status == 'PRESENT' %}selected{% endif %}>PRESENT</option>
+          <option value="ABSENT" {% if request.GET.status == 'ABSENT' %}selected{% endif %}>ABSENT</option>
+        </select>
+      </div>
+      <div>
+        <label for="filter_method" class="label">Method</label>
+        <select name="method" id="filter_method" class="select">
+          <option value="">All</option>
+          <option value="QR" {% if request.GET.method == 'QR' %}selected{% endif %}>QR</option>
+          <option value="MANUAL" {% if request.GET.method == 'MANUAL' %}selected{% endif %}>MANUAL</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm" style="height:42px"><i class="fa-solid fa-filter" aria-hidden="true"></i> Filter</button>
+      <a href="{% url 'attendance:teacher_history' %}" class="btn btn-ghost btn-sm" style="height:42px">Clear</a>
+    </div>
+  </form>
+</div>
+
+<div class="card" style="overflow:hidden">
+  <div class="table-wrap" tabindex="0" role="region" aria-label="Attendance records">
+    <table class="table">
+      <caption class="sr-only" style="position:absolute;left:-9999px">Attendance records filtered list</caption>
+      <thead><tr><th scope="col">Student</th><th scope="col">Roll</th><th scope="col">Class</th><th scope="col">Subject</th><th scope="col">Date</th><th scope="col">Status</th><th scope="col">Method</th><th scope="col">Distance</th><th scope="col">Face</th><th scope="col">Time</th><th scope="col">Session</th></tr></thead>
+      <tbody>
+        {% for r in records %}
+        <tr>
+          <td><b>{{ r.student.username }}</b><div style="font-size:11px;color:var(--muted)">{{ r.student.email }}</div></td>
+          <td>{{ r.student.roll_number|default:"—" }}</td>
+          <td><span class="badge" style="background:#f8fafc;border:1px solid var(--border)">{{ r.session.classroom.code }}</span></td>
+          <td>{{ r.session.subject.name }}</td>
+          <td>{{ r.session.created_at|date:"M d, Y" }}</td>
+          <td><span class="badge {% if r.status == 'PRESENT' %}badge-success{% else %}badge-danger{% endif %}">{{ r.status }}</span></td>
+          <td><span class="badge {% if r.method == 'QR' %}badge-primary{% else %}badge-dark{% endif %}">{{ r.method }}</span></td>
+          <td style="font-size:12px">{{ r.distance_meters|default_if_none:"—"|floatformat:0 }}{% if r.distance_meters %}m{% endif %}</td>
+          <td>{% if r.face_verified %}<span class="badge badge-primary">Yes</span>{% else %}No{% endif %}</td>
+          <td style="font-size:12px">{{ r.marked_at|date:"H:i:s" }}</td>
+          <td style="font-size:11px;color:var(--muted)">{{ r.session.id|slice:":8" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="11" style="text-align:center;padding:32px;color:var(--muted)">
+          <div style="width:48px;height:48px;border-radius:12px;background:#f1f5f9;display:grid;place-items:center;margin:0 auto 10px"><i class="fa-solid fa-inbox"></i></div>
+          No records match filter. Try clearing filters or create a session.
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if page_obj.paginator.num_pages > 1 %}
+  <div style="padding:16px;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap" role="navigation" aria-label="Pagination">
+    {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}&{{ request.GET.urlencode }}" class="btn btn-ghost btn-sm">Previous</a>{% endif %}
+    <span style="font-size:13px;color:var(--muted)">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} — {{ page_obj.paginator.count }} total</span>
+    {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}&{{ request.GET.urlencode }}" class="btn btn-ghost btn-sm">Next</a>{% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="card card-pad" style="margin-top:16px">
+  <h2 style="font-family:Space Grotesk,sans-serif;font-size:16px">Recent Sessions</h2>
+  <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+    {% for s in sessions %}
+      <a href="{% url 'attendance:teacher_session' s.id %}" style="display:flex;gap:12px;align-items:center;padding:12px;border:1px solid var(--border);border-radius:12px;background:white">
+        <span class="badge {% if s.status == 'OPEN' %}badge-success{% elif s.status == 'EXPIRED' %}badge-warning{% else %}badge-dark{% endif %}">{{ s.status }}</span>
+        <b>{{ s.classroom.code }} • {{ s.subject.code }}</b>
+        <span style="color:var(--muted);font-size:13px">{{ s.created_at|date:"M d, Y H:i" }}</span>
+        <span style="margin-left:auto;font-size:12px">{{ s.get_present_count }}/{{ s.get_total_enrolled }} present</span>
+      </a>
+    {% empty %}
+      <p style="color:var(--muted);font-size:13px">No sessions yet.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
