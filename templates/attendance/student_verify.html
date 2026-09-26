@@ -240,38 +240,29 @@ function updateDistanceUI(){
   }
 }
 
-// Improved location: try 3 times, pick best accuracy (lowest)
-async function getBestPosition(attempts=3, timeout=12000){
-  let best=null;
-  for(let i=0;i<attempts;i++){
-    try{
-      const pos = await new Promise((resolve, reject)=>{
-        if(!navigator.geolocation) return reject({code:0, message:'Geolocation not supported', BEST: best});
-        navigator.geolocation.getCurrentPosition(resolve, reject, {enableHighAccuracy:true, timeout: timeout, maximumAge:0});
-      });
-      const acc = pos.coords.accuracy;
-      // console log for debug
-      console.log(`Location attempt ${i+1}:`, pos.coords.latitude, pos.coords.longitude, '±'+Math.round(acc)+'m');
-      if(!best || acc < best.coords.accuracy) best=pos;
-      // if we got excellent accuracy, stop early
-      if(acc < 12) break;
-      // wait 600ms between attempts for GPS to stabilize
-      if(i<attempts-1) await new Promise(r=>setTimeout(r, 700));
-    }catch(e){
-      if(e.code===1){ // permission denied
-        throw e;
-      }
-      // try next attempt on timeout/unavailable
-      console.log('Location attempt failed', i+1, e);
-      if(i===attempts-1 && !best) throw e;
-      await new Promise(r=>setTimeout(r, 700));
-    }
-  }
-  return best;
+// Fast location: single high-accuracy attempt, 6-7s max (real-world 5-10s requirement)
+async function getBestPosition(timeout=7000){
+  return new Promise((resolve, reject)=>{
+    if(!navigator.geolocation) return reject({code:0, message:'Geolocation not supported'});
+    const opts = {enableHighAccuracy:true, timeout: timeout, maximumAge: 5000};
+    // Race with a hard 7.5s cap to never exceed 10s
+    let done=false;
+    const timer=setTimeout(()=>{ if(!done){ done=true; reject({code:3, message:'Location timeout — try near window, enable High Accuracy'}); }}, timeout+500);
+    navigator.geolocation.getCurrentPosition(pos=>{
+      if(done) return;
+      done=true; clearTimeout(timer);
+      console.log('Location:', pos.coords.latitude, pos.coords.longitude, '±'+Math.round(pos.coords.accuracy)+'m');
+      resolve(pos);
+    }, err=>{
+      if(done) return;
+      done=true; clearTimeout(timer);
+      reject(err);
+    }, opts);
+  });
 }
 
 async function captureLocation(){
-  const pos = await getBestPosition(3, 12000);
+  const pos = await getBestPosition(7000);
   studentLat=pos.coords.latitude; studentLng=pos.coords.longitude; studentAcc=pos.coords.accuracy;
   document.getElementById('sLat').textContent=studentLat.toFixed(6);
   document.getElementById('sLng').textContent=studentLng.toFixed(6);
@@ -337,14 +328,12 @@ async function checkFaceToggle(){
 }
 
 async function startAttempt(){
-  // must have location — use best-of-3
+  // Use existing location if already captured (avoid double 7s wait)
   try{
     if(studentLat===null){
       await captureLocation();
-    } else {
-      // refresh for best accuracy right before start
-      try{ await captureLocation(); }catch(e){}
     }
+    // else reuse existing — already captured by startBtn, no need to recapture
   }catch(e){
     let reason='denied';
     if(e.code===1) reason='denied'; else if(e.code===2) reason='unavailable'; else if(e.code===3) reason='timeout'; else reason='disabled';
@@ -364,7 +353,7 @@ async function startAttempt(){
   const res=await fetch('/attendance/api/attempt/start/',{
     method:'POST',
     headers:{'Content-Type':'application/json','X-CSRFToken':'{{ csrf_token }}'},
-    body: JSON.stringify({token: sessionToken, latitude: studentLat, longitude: studentLng})
+    body: JSON.stringify({token: sessionToken, latitude: studentLat, longitude: studentLng, accuracy: studentAcc})
   });
   const data=await res.json();
   if(res.ok){
@@ -429,10 +418,13 @@ async function triggerScan(tokenVal){
   if(!input){document.getElementById('scanMsg').innerHTML='<span style="color:#dc2626">Enter token</span>';return;}
   document.getElementById('scanMsg').innerHTML='<span style="color:#2563eb"><i class="fa-solid fa-spinner fa-spin"></i> Validating…</span>';
   document.getElementById('scanBtn').disabled=true;
-  try{ await captureLocation(); }catch(e){}
+  // Reuse existing location — don't block 7s again. Only capture if missing.
+  if(studentLat===null){
+    try{ await captureLocation(); }catch(e){ console.warn('location reuse failed', e); }
+  }
   try{
     const payload={token: input};
-    if(studentLat!==null){payload.latitude=studentLat; payload.longitude=studentLng;}
+    if(studentLat!==null){payload.latitude=studentLat; payload.longitude=studentLng; payload.accuracy=studentAcc;}
     const res=await fetch(`/attendance/api/attempt/${attemptId}/scan/`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':'{{ csrf_token }}'},body:JSON.stringify(payload)});
     const data=await res.json();
     if(res.ok){
@@ -513,7 +505,7 @@ async function retry(){
   try{await captureLocation();}catch(e){}
 }
 document.getElementById('startBtn')?.addEventListener('click', async()=>{
-  const btn=document.getElementById('startBtn'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Checking location (best of 3)…';
+  const btn=document.getElementById('startBtn'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Checking location (5-7s)…';
   try{await captureLocation();}catch(e){
     let reason='denied'; if(e.code===1) reason='denied'; else if(e.code===2) reason='unavailable'; else reason='timeout';
     showFrozen(reason);

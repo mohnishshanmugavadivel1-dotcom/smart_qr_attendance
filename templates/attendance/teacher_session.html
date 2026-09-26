@@ -376,27 +376,24 @@ async function captureStudentFace(){
   }catch(e){ msg.innerHTML='<span style="color:#dc2626">Network error</span>'; }
 }
 
-// Improved teacher location — best-of-3 for accuracy
-async function getBestPosTeacher(attempts=3, timeout=12000){
-  let best=null;
-  for(let i=0;i<attempts;i++){
-    try{
-      const p=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true, timeout, maximumAge:0}));
-      if(!best || p.coords.accuracy < best.coords.accuracy) best=p;
-      if(p.coords.accuracy < 12) break;
-      if(i<attempts-1) await new Promise(r=>setTimeout(r,600));
-    }catch(e){ if(e.code===1) throw e; if(i===attempts-1 && !best) throw e; await new Promise(r=>setTimeout(r,600)); }
-  }
-  return best;
+// Fast teacher location — single attempt, 6-7s max (real-world 5-10s)
+async function getBestPosTeacher(timeout=7000){
+  return new Promise((res,rej)=>{
+    if(!navigator.geolocation) return rej({code:0, message:'Geolocation not supported'});
+    let done=false;
+    const timer=setTimeout(()=>{ if(!done){ done=true; rej({code:3, message:'Timeout — try near window'}); }}, timeout+500);
+    navigator.geolocation.getCurrentPosition(p=>{ if(done) return; done=true; clearTimeout(timer); res(p); },
+      e=>{ if(done) return; done=true; clearTimeout(timer); rej(e); },
+      {enableHighAccuracy:true, timeout, maximumAge:5000});
+  });
 }
 async function captureTeacherLocation(){
   const badge=document.getElementById('locBadge'), tLat=document.getElementById('tLat'), tLng=document.getElementById('tLng'), topBadge=document.getElementById('teacherLocBadge');
   if(!navigator.geolocation){alert('Geolocation not supported');return}
-  badge.textContent='Capturing (best of 3, ~3s)…';badge.className='badge badge-warning';
+  badge.textContent='Capturing (5-7s)…';badge.className='badge badge-warning';
   try{
-    const pos=await getBestPosTeacher(3, 12000);
+    const pos=await getBestPosTeacher(7000);
     const lat=pos.coords.latitude, lng=pos.coords.longitude, acc=Math.round(pos.coords.accuracy);
-    // Show accuracy in UI
     const res=await fetch(`/attendance/session/${sessionId}/teacher-location/`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':'{{ csrf_token }}'},body:JSON.stringify({latitude:lat, longitude:lng, accuracy: acc})});
     const data=await res.json();
     if(res.ok){
@@ -406,13 +403,13 @@ async function captureTeacherLocation(){
       topBadge.className= acc>30 ? 'badge badge-warning' : 'badge badge-success';
       addFeed(`Teacher location updated: ${lat.toFixed(5)}, ${lng.toFixed(5)} ±${acc}m`, 'manual');
       if(acc>30){
-        alert(`Warning: Your location accuracy is ±${acc}m (poor). Distance to students will be off by ~${acc}m. Move near window/outdoors, enable High Accuracy in phone settings, and retry. Sitting 0m away showing 21m is expected with ±20m accuracy.`);
+        console.warn(`Low accuracy ±${acc}m — try near window`);
       }
     } else alert(data.error);
   }catch(err){
     let m='Failed'; if(err.code===1) m='Permission denied — enable location in browser & OS settings';
     else if(err.code===2) m='Location unavailable — check GPS';
-    else if(err.code===3) m='Timeout — try near window';
+    else if(err.code===3) m='Timeout — try near window (5s)';
     badge.textContent=m;badge.className='badge badge-danger'; alert(m);
   }
 }
