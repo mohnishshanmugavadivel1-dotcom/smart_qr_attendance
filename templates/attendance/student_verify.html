@@ -169,6 +169,36 @@
         <span class="badge" style="background:#f1f5f9;border:1px solid var(--border)">Attempt: <span id="attemptId">—</span></span>
         <span class="badge {% if session.face_verification_enabled %}badge-dark{% else %}badge-primary{% endif %}" id="faceRequiredBadge"><i class="fa-solid fa-camera"></i> Face {% if session.face_verification_enabled %}Teacher-side{% else %}Off{% endif %}</span>
       </div>
+      {% if debug %}
+      <div id="qrPerfPanel" style="margin-top:18px;background:#0f172a;color:#e2e8f0;border:1px solid #1e293b;border-radius:14px;padding:14px;overflow:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <b style="font-family:Space Grotesk,sans-serif;font-size:13px;letter-spacing:.04em"><i class="fa-solid fa-bug"></i> DEBUG — QR Performance Instrumentation (DEBUG mode only)</b>
+          <span style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;opacity:.7">Not visible in production (DEBUG=False)</span>
+        </div>
+        <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:11px">
+          <div style="background:#1e293b;border-radius:10px;padding:10px">
+            <div style="font-weight:800;opacity:.8">Counters</div>
+            <div id="qrPerfCounters" style="margin-top:6px;line-height:1.6">getUserMedia: 0 • geolocation: 0 • scan loops: 0 • frames decoded: 0 • scan POSTs: 0</div>
+            <div id="qrPerfDiagnostics" style="margin-top:6px;color:#fde68a;line-height:1.5"></div>
+          </div>
+          <div style="background:#1e293b;border-radius:10px;padding:10px">
+            <div style="font-weight:800;opacity:.8">Live</div>
+            <div id="qrPerfLive" style="margin-top:6px;line-height:1.6">Waiting for Start…</div>
+            <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+              <button type="button" class="btn btn-ghost btn-sm" style="background:#334155;color:white;border-color:#475569" onclick="QRPerf.exportJSON()"><i class="fa-solid fa-download"></i> Export JSON</button>
+              <button type="button" class="btn btn-ghost btn-sm" style="background:#334155;color:white;border-color:#475569" onclick="QRPerf.copyTable()"><i class="fa-solid fa-copy"></i> Copy</button>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:12px;overflow:auto;max-height:320px;border:1px solid #1e293b;border-radius:10px">
+          <table class="table" style="margin:0;font-size:12px">
+            <thead><tr><th style="background:#0f172a;color:#94a3b8;position:sticky;top:0">#</th><th style="background:#0f172a;color:#94a3b8;position:sticky;top:0">Stage</th><th style="background:#0f172a;color:#94a3b8;position:sticky;top:0">Timestamp (ms)</th><th style="background:#0f172a;color:#94a3b8;position:sticky;top:0">Δ prev (ms)</th><th style="background:#0f172a;color:#94a3b8;position:sticky;top:0">Cumulative from Start (ms)</th></tr></thead>
+            <tbody id="qrPerfTableBody"><tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:16px">No stages yet — tap Start</td></tr></tbody>
+          </table>
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:#94a3b8">Uses <code>performance.mark()/measure()</code>. Timestamps are <code>performance.now()</code> (high-res). Cumulative = from <b>Start button pressed</b>. Also open DevTools Console → <code>QRPerf.stages</code> / <code>performance.getEntriesByType('mark')</code>.</div>
+      </div>
+      {% endif %}
     {% endif %}
   </div>
 </div>
@@ -176,6 +206,113 @@
 {% if session and not already_present and not not_enrolled %}
 <script src="https://unpkg.com/jsqr@1.4.0/dist/jsQR.js"></script>
 <script>
+// ===== QR PERFORMANCE FORENSIC INSTRUMENTATION — READ-ONLY, DEBUG ONLY =====
+// Spec: 17 stages via performance.mark()/measure(), counters, diagnostics, DEBUG panel.
+// No attendance logic changed; no DB/QR expiry/location/face logic altered.
+const __DEBUG_PERF = {{ debug|yesno:"true,false" }}; // from verify_page context; true only in DEBUG mode
+// Stage definitions in spec order
+const QR_STAGES = [
+  "verify-page-loaded",
+  "start-button-pressed",
+  "geolocation-request-started",
+  "geolocation-success",
+  "geolocation-error",
+  "attempt-request-started",
+  "attempt-response-received",
+  "camera-getUserMedia-requested",
+  "camera-stream-obtained",
+  "video-first-frame-available",
+  "jsQR-loop-started",
+  "first-frame-sent-to-decoder",
+  "first-qr-decode-success",
+  "scan-POST-started",
+  "scan-POST-completed",
+  "verification-countdown-started",
+  "verification-completed",
+  "final-response-received"
+];
+window.QRPerf = {
+  debug: __DEBUG_PERF,
+  stages: [], // {name, ts, deltaPrev, cumulativeFromStart}
+  startTs: null, // performance.now at start-button-pressed
+  pageLoadTs: performance.now(),
+  counters: { getUserMedia:0, geolocation:0, scanLoops:0, framesDecoded:0, scanPOSTs:0, attemptPOSTs:0, cameraStreams:0 },
+  flags: { multipleLoops:false, loopAfterDecode:false, duplicateScanPOST:false, cachedLocationReacquired:false },
+  videoMeta: { width:0, height:0, canvasW:0, canvasH:0 },
+  _lastTs: null,
+  mark(name, extra){
+    try { performance.mark(name); } catch(e) {}
+    const ts = performance.now();
+    // detect start
+    if(name==="start-button-pressed" && this.startTs===null) this.startTs = ts;
+    const deltaPrev = this._lastTs===null ? 0 : Math.round(ts - this._lastTs);
+    const cumulative = this.startTs===null ? 0 : Math.round(ts - this.startTs);
+    // Avoid duplicate identical consecutive marks unless geolocation retry (but we record)
+    this.stages.push({ name, ts: Math.round(ts), deltaPrev, cumulativeFromStart: this.startTs? cumulative : 0, extra: extra||null });
+    this._lastTs = ts;
+    if(this.debug) this.render();
+    // Also measure from previous stage for DevTools
+    try {
+      if(this.stages.length>1){
+        const prev = this.stages[this.stages.length-2].name;
+        performance.measure(`${prev}→${name}`, prev, name);
+      }
+    } catch(e) {}
+    console.debug(`[QRPerf] ${name}`, {ts: Math.round(ts), deltaPrev, cumulative, extra});
+  },
+  inc(counter){
+    if(counter in this.counters) this.counters[counter]++;
+    if(this.debug) this.renderCounters();
+  },
+  render(){
+    if(!this.debug) return;
+    const tbody = document.getElementById('qrPerfTableBody');
+    if(!tbody) return;
+    if(this.stages.length===0){ tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:16px">No stages yet</td></tr>`; return; }
+    tbody.innerHTML = this.stages.map((s,i)=>`<tr><td>${i+1}</td><td><code style="font-size:11px;background:#1e293b;color:#e2e8f0;padding:2px 6px;border-radius:6px">${s.name}</code>${s.extra?` <span style="font-size:10px;color:#94a3b8">${s.extra}</span>`:''}</td><td>${s.ts}</td><td>${i===0?0:s.deltaPrev}</td><td>${s.cumulativeFromStart}</td></tr>`).join('');
+    this.renderCounters();
+    this.renderDiagnostics();
+    const live = document.getElementById('qrPerfLive');
+    if(live){
+      const last = this.stages[this.stages.length-1];
+      live.textContent = `${last.name} @ ${last.ts}ms (Δ ${last.deltaPrev}ms, cum ${last.cumulativeFromStart}ms from Start)`;
+    }
+  },
+  renderCounters(){
+    const el = document.getElementById('qrPerfCounters');
+    if(!el) return;
+    const c=this.counters;
+    el.textContent = `getUserMedia: ${c.getUserMedia} • geolocation: ${c.geolocation} • scan loops: ${c.scanLoops} • frames decoded: ${c.framesDecoded} • scan POSTs: ${c.scanPOSTs} • attempt POSTs: ${c.attemptPOSTs} • streams: ${c.cameraStreams}`;
+  },
+  renderDiagnostics(){
+    const el = document.getElementById('qrPerfDiagnostics');
+    if(!el) return;
+    const c=this.counters, f=this.flags, v=this.videoMeta;
+    const issues=[];
+    if(c.getUserMedia>1) issues.push(`⚠️ getUserMedia called ${c.getUserMedia}× (multiple camera init)`);
+    if(c.geolocation>1) issues.push(`⚠️ geolocation requested ${c.geolocation}×`);
+    if(f.cachedLocationReacquired) issues.push(`⚠️ cached location reacquired unnecessarily`);
+    if(f.multipleLoops) issues.push(`⚠️ multiple scan loops detected simultaneously`);
+    if(f.loopAfterDecode) issues.push(`⚠️ scan loop continued after decode`);
+    if(f.duplicateScanPOST) issues.push(`⚠️ duplicate scan POSTs`);
+    if(c.framesDecoded>0) issues.push(`Frames decoded: ${c.framesDecoded}`);
+    if(v.width) issues.push(`Video ${v.width}×${v.height} → Canvas ${v.canvasW}×${v.canvasH}`);
+    else issues.push(`Video dimensions not yet captured`);
+    el.innerHTML = issues.map(x=>`<div>• ${x}</div>`).join('') || '<span style="opacity:.6">No diagnostics yet</span>';
+  },
+  exportJSON(){
+    const blob = new Blob([JSON.stringify({stages:this.stages, counters:this.counters, flags:this.flags, videoMeta:this.videoMeta, marks: performance.getEntriesByType('mark').map(m=>({name:m.name, startTime:Math.round(m.startTime)}))}, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download='qr-perf-'+Date.now()+'.json'; a.click(); URL.revokeObjectURL(url);
+  },
+  copyTable(){
+    const txt = this.stages.map(s=>`${s.name}\t${s.ts}\t${s.deltaPrev}\t${s.cumulativeFromStart}`).join('\n');
+    navigator.clipboard.writeText(txt).then(()=>alert('Copied stages TSV'));
+  }
+};
+// 1. verify page loaded — immediate at script evaluation (before DOMContentLoaded)
+QRPerf.mark('verify-page-loaded');
+window.addEventListener('load', ()=>{ try{ performance.mark('window-load'); }catch(e){} });
 const tokenFromQR = "{{ token|default:'' }}";
 const sessionToken = "{{ session.token }}";
 const faceRequiredInitial = {{ session.face_verification_enabled|yesno:"true,false" }};
@@ -240,22 +377,28 @@ function updateDistanceUI(){
   }
 }
 
-// Fast location: single high-accuracy attempt, 6-7s max (real-world 5-10s requirement)
+// Fast location: single high-accuracy attempt, 6-7s max (real-world 5-10s requirement) — INSTRUMENTED
 async function getBestPosition(timeout=7000){
+  QRPerf.inc('geolocation');
+  QRPerf.mark('geolocation-request-started');
   return new Promise((resolve, reject)=>{
-    if(!navigator.geolocation) return reject({code:0, message:'Geolocation not supported'});
+    if(!navigator.geolocation) {
+      QRPerf.mark('geolocation-error', 'not supported');
+      return reject({code:0, message:'Geolocation not supported'});
+    }
     const opts = {enableHighAccuracy:true, timeout: timeout, maximumAge: 5000};
-    // Race with a hard 7.5s cap to never exceed 10s
     let done=false;
-    const timer=setTimeout(()=>{ if(!done){ done=true; reject({code:3, message:'Location timeout — try near window, enable High Accuracy'}); }}, timeout+500);
+    const timer=setTimeout(()=>{ if(!done){ done=true; QRPerf.mark('geolocation-error', 'hard timeout'); reject({code:3, message:'Location timeout — try near window, enable High Accuracy'}); }}, timeout+500);
     navigator.geolocation.getCurrentPosition(pos=>{
       if(done) return;
       done=true; clearTimeout(timer);
+      QRPerf.mark('geolocation-success', `±${Math.round(pos.coords.accuracy)}m`);
       console.log('Location:', pos.coords.latitude, pos.coords.longitude, '±'+Math.round(pos.coords.accuracy)+'m');
       resolve(pos);
     }, err=>{
       if(done) return;
       done=true; clearTimeout(timer);
+      QRPerf.mark('geolocation-error', `code ${err.code}: ${err.message||'error'}`);
       reject(err);
     }, opts);
   });
@@ -328,12 +471,16 @@ async function checkFaceToggle(){
 }
 
 async function startAttempt(){
-  // Use existing location if already captured (avoid double 7s wait)
+  // Use existing location if already captured (avoid double 7s wait) — INSTRUMENTED: detect unnecessary reacquire
+  let reused = false;
   try{
     if(studentLat===null){
       await captureLocation();
+    } else {
+      reused = true;
+      QRPerf.flags.cachedLocationReacquired = false; // not reacquired, correctly reused
+      // For diagnostics: if we had called captureLocation again unnecessarily, flag would be true (old best-of-3 did)
     }
-    // else reuse existing — already captured by startBtn, no need to recapture
   }catch(e){
     let reason='denied';
     if(e.code===1) reason='denied'; else if(e.code===2) reason='unavailable'; else if(e.code===3) reason='timeout'; else reason='disabled';
@@ -350,12 +497,15 @@ async function startAttempt(){
   }
   distanceM=haversine(studentLat, studentLng, teacherLat, teacherLng);
   updateDistanceUI();
+  QRPerf.inc('attemptPOSTs');
+  QRPerf.mark('attempt-request-started', reused ? 'reused cached loc' : 'fresh loc');
   const res=await fetch('/attendance/api/attempt/start/',{
     method:'POST',
     headers:{'Content-Type':'application/json','X-CSRFToken':'{{ csrf_token }}'},
     body: JSON.stringify({token: sessionToken, latitude: studentLat, longitude: studentLng, accuracy: studentAcc})
   });
   const data=await res.json();
+  QRPerf.mark('attempt-response-received', res.ok ? `attempt ${data.attempt_id||'?'}` : `err ${data.error||res.status}`);
   if(res.ok){
     attemptId=data.attempt_id;
     distanceM=data.distance; updateDistanceUI();
@@ -393,27 +543,103 @@ function startHeartbeat(){
 }
 function stopHeartbeat(){if(heartbeatTimer) clearInterval(heartbeatTimer);}
 
-// QR Camera
+// QR Camera — INSTRUMENTED for getUserMedia, stream, video first frame, loop, frames
 let stream=null, raf=null, scanning=false;
+let __scanLoopCount=0, __framesDecoded=0, __firstFrameSent=false, __decodeSuccess=false;
 async function startCamera(){
+  QRPerf.inc('getUserMedia');
+  QRPerf.mark('camera-getUserMedia-requested', `call #${QRPerf.counters.getUserMedia}`);
+  // Detect multiple simultaneous loops
+  if(scanning && raf){
+    QRPerf.flags.multipleLoops = true;
+    console.warn('[QRPerf] startCamera called while already scanning — multiple loops risk');
+  }
+  // If camera startup blocks decoding, we measure stream obtained -> loop started gap
   try{
     stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-    const v=document.getElementById('video'); v.srcObject=stream; await v.play(); scanning=true; scanLoop();
-  }catch(e){document.getElementById('scanMsg').innerHTML='<span style="color:#dc2626">Camera denied — use manual token</span>';}
+    QRPerf.inc('cameraStreams');
+    QRPerf.mark('camera-stream-obtained', `stream #${QRPerf.counters.cameraStreams}`);
+    const v=document.getElementById('video');
+    v.srcObject=stream;
+    // Instrument video first frame: loadedmetadata + canplay + HAVE_ENOUGH_DATA
+    let firstFrameMarked=false;
+    const markFirstFrame = (src)=>{
+      if(firstFrameMarked) return;
+      firstFrameMarked=true;
+      QRPerf.videoMeta.width = v.videoWidth||0;
+      QRPerf.videoMeta.height = v.videoHeight||0;
+      QRPerf.mark('video-first-frame-available', `${v.videoWidth}x${v.videoHeight} via ${src}`);
+      v.removeEventListener('loadedmetadata', onMeta);
+      v.removeEventListener('canplay', onCanPlay);
+    };
+    const onMeta = ()=>markFirstFrame('loadedmetadata');
+    const onCanPlay = ()=>markFirstFrame('canplay');
+    v.addEventListener('loadedmetadata', onMeta, {once:true});
+    v.addEventListener('canplay', onCanPlay, {once:true});
+    await v.play();
+    // Fallback if metadata already fired before listener
+    if(v.videoWidth && !firstFrameMarked) markFirstFrame('play-resolved');
+    scanning=true;
+    // Reset loop counters per camera start
+    __scanLoopCount++;
+    QRPerf.inc('scanLoops');
+    if(__scanLoopCount>1) QRPerf.flags.multipleLoops = true;
+    QRPerf.mark('jsQR-loop-started', `loop #${__scanLoopCount}, scanning=${scanning}`);
+    scanLoop();
+  }catch(e){
+    QRPerf.mark('camera-stream-obtained', `ERROR: ${e.name||e.message}`);
+    document.getElementById('scanMsg').innerHTML='<span style="color:#dc2626">Camera denied — use manual token</span>';
+  }
 }
-function stopCamera(){scanning=false; if(raf) cancelAnimationFrame(raf); if(stream){stream.getTracks().forEach(t=>t.stop()); stream=null;}}
+function stopCamera(){
+  scanning=false;
+  if(raf) cancelAnimationFrame(raf);
+  // Check if loop continued after decode
+  if(__decodeSuccess && scanning) QRPerf.flags.loopAfterDecode = true;
+  if(stream){stream.getTracks().forEach(t=>t.stop()); stream=null;}
+}
 function scanLoop(){
   if(!scanning) return;
   const v=document.getElementById('video'), c=document.getElementById('canvas'), ctx=c.getContext('2d');
+  // Track that we process every frame via rAF — measure FPS implicitly via framesDecoded
   if(v.readyState===v.HAVE_ENOUGH_DATA){
-    c.width=v.videoWidth; c.height=v.videoHeight; ctx.drawImage(v,0,0,c.width,c.height);
+    // Capture canvas dimensions used for jsQR
+    c.width=v.videoWidth; c.height=v.videoHeight;
+    if(!QRPerf.videoMeta.canvasW){
+      QRPerf.videoMeta.canvasW = c.width; QRPerf.videoMeta.canvasH = c.height;
+    }
+    ctx.drawImage(v,0,0,c.width,c.height);
+    // 11. first frame sent to decoder — only first time
+    if(!__firstFrameSent){
+      __firstFrameSent=true;
+      QRPerf.mark('first-frame-sent-to-decoder', `${c.width}x${c.height}`);
+    }
+    QRPerf.inc('framesDecoded'); __framesDecoded++;
+    // Every frame is sent to jsQR — this is "scanning every camera frame: YES" (rAF loop)
     const img=ctx.getImageData(0,0,c.width,c.height); const code=jsQR(img.data, img.width, img.height, {inversionAttempts:'dontInvert'});
-    if(code){document.getElementById('tokenInput').value=code.data.trim(); triggerScan(code.data.trim()); return;}
+    if(code){
+      if(__decodeSuccess){
+        // Should not happen: loop continued after decode (should have returned)
+        QRPerf.flags.loopAfterDecode = true;
+      }
+      __decodeSuccess=true;
+      QRPerf.mark('first-qr-decode-success', `data len ${code.data.length}, frames ${__framesDecoded}`);
+      document.getElementById('tokenInput').value=code.data.trim(); triggerScan(code.data.trim()); return;
+    }
   }
   raf=requestAnimationFrame(scanLoop);
 }
 async function triggerScan(tokenVal){
-  if(scanVerified) return;
+  if(scanVerified){
+    QRPerf.flags.duplicateScanPOST = true;
+    console.warn('[QRPerf] triggerScan called but scanVerified already true — duplicate prevented');
+    return;
+  }
+  // Detect multiple scan loops simultaneously: if scanVerified false but triggerScan re-entered before previous POST completes
+  if(window.__scanPOSTInFlight){
+    QRPerf.flags.duplicateScanPOST = true;
+    console.warn('[QRPerf] duplicate scan POST in flight');
+  }
   const input=tokenVal || document.getElementById('tokenInput').value.trim();
   if(!input){document.getElementById('scanMsg').innerHTML='<span style="color:#dc2626">Enter token</span>';return;}
   document.getElementById('scanMsg').innerHTML='<span style="color:#2563eb"><i class="fa-solid fa-spinner fa-spin"></i> Validating…</span>';
@@ -425,10 +651,17 @@ async function triggerScan(tokenVal){
   try{
     const payload={token: input};
     if(studentLat!==null){payload.latitude=studentLat; payload.longitude=studentLng; payload.accuracy=studentAcc;}
+    QRPerf.inc('scanPOSTs');
+    QRPerf.mark('scan-POST-started', `attempt ${attemptId}, token len ${input.length}`);
+    window.__scanPOSTInFlight = true;
     const res=await fetch(`/attendance/api/attempt/${attemptId}/scan/`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':'{{ csrf_token }}'},body:JSON.stringify(payload)});
+    window.__scanPOSTInFlight = false;
+    QRPerf.mark('scan-POST-completed', res.ok ? `200 ${res.status}` : `${res.status} ${res.statusText}`);
     const data=await res.json();
     if(res.ok){
       scanVerified=true; stopCamera();
+      // Detect if scan loop continued after decode: if raf still pending after triggerScan, flag
+      if(raf && scanning) QRPerf.flags.loopAfterDecode = true;
       document.getElementById('scanMsg').innerHTML='<span style="color:#059669"><i class="fa-solid fa-circle-check"></i> '+data.message+'</span>';
       // No face scan here — go directly to verification. Teacher handles face separately.
       startVerify();
@@ -436,11 +669,15 @@ async function triggerScan(tokenVal){
       document.getElementById('scanMsg').innerHTML='<span style="color:#dc2626"><i class="fa-solid fa-triangle-exclamation"></i> '+(data.error||'Invalid')+'</span>';
       document.getElementById('scanBtn').disabled=false;
     }
-  }catch(e){document.getElementById('scanMsg').innerHTML='<span style="color:#dc2626">Network error</span>';document.getElementById('scanBtn').disabled=false;}
+  }catch(e){
+    window.__scanPOSTInFlight = false;
+    QRPerf.mark('scan-POST-completed', `ERROR ${e.message||e}`);
+    document.getElementById('scanMsg').innerHTML='<span style="color:#dc2626">Network error</span>';document.getElementById('scanBtn').disabled=false;}
 }
 document.getElementById('scanBtn')?.addEventListener('click',()=>triggerScan());
 
 function startVerify(){
+  QRPerf.mark('verification-countdown-started', `10s countdown`);
   checkFaceToggle().then(enabled=>{
     showState('verify'); verifyLeft=10;
     setStep('verify');
@@ -454,10 +691,14 @@ function startVerify(){
       document.getElementById('verifyProgress').style.width=(verifyLeft*10)+'%';
       if(verifyLeft<=0){
         clearInterval(verifyTimer);
+        QRPerf.mark('verification-completed', `10s elapsed`);
         document.getElementById('verifyMsg').innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Finalizing…';
+        const __finalStart = performance.now();
+        performance.mark('final-POST-started');
         try{
           const res=await fetch(`/attendance/api/attempt/${attemptId}/complete/`,{method:'POST',headers:{'X-CSRFToken':'{{ csrf_token }}'}});
           const data=await res.json();
+          QRPerf.mark('final-response-received', `${res.status} ${res.ok?'OK':'ERR'} after ${Math.round(performance.now()-__finalStart)}ms`);
           if(res.ok){
             showSuccess(data.distance);
           } else {
@@ -472,7 +713,9 @@ function startVerify(){
               invalidateUI(data.error||'Verification failed');
             }
           }
-        }catch(e){invalidateUI('Network error during finalization');}
+        }catch(e){
+          QRPerf.mark('final-response-received', `ERROR ${e.message||e}`);
+          invalidateUI('Network error during finalization');}
       }
     },1000);
   });
@@ -505,6 +748,7 @@ async function retry(){
   try{await captureLocation();}catch(e){}
 }
 document.getElementById('startBtn')?.addEventListener('click', async()=>{
+  QRPerf.mark('start-button-pressed');
   const btn=document.getElementById('startBtn'); btn.disabled=true; btn.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> Checking location (5-7s)…';
   try{await captureLocation();}catch(e){
     let reason='denied'; if(e.code===1) reason='denied'; else if(e.code===2) reason='unavailable'; else reason='timeout';

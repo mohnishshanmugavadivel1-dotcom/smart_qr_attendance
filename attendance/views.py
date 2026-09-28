@@ -511,6 +511,7 @@ def verify_page(request):
         'is_active': session.is_active() if session else False,
         'is_expired': session.is_expired() if session else False,
         'location_denied': location_denied,
+        'debug': settings.DEBUG,
     })
 
 # API: start attempt (now with location)
