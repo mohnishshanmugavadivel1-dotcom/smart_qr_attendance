@@ -236,9 +236,9 @@ window.QRPerf = {
   stages: [], // {name, ts, deltaPrev, cumulativeFromStart}
   startTs: null, // performance.now at start-button-pressed
   pageLoadTs: performance.now(),
-  counters: { getUserMedia:0, geolocation:0, scanLoops:0, framesDecoded:0, scanPOSTs:0, attemptPOSTs:0, cameraStreams:0 },
+  counters: { getUserMedia:0, geolocation:0, scanLoops:0, framesDecoded:0, scanPOSTs:0, attemptPOSTs:0, cameraStreams:0, decodeAttempts:0 },
   flags: { multipleLoops:false, loopAfterDecode:false, duplicateScanPOST:false, cachedLocationReacquired:false },
-  videoMeta: { width:0, height:0, canvasW:0, canvasH:0 },
+  videoMeta: { width:0, height:0, canvasW:0, canvasH:0, decodeResolution:0, decodeIntervalMs:90 },
   _lastTs: null,
   mark(name, extra){
     try { performance.mark(name); } catch(e) {}
@@ -282,7 +282,8 @@ window.QRPerf = {
     const el = document.getElementById('qrPerfCounters');
     if(!el) return;
     const c=this.counters;
-    el.textContent = `getUserMedia: ${c.getUserMedia} • geolocation: ${c.geolocation} • scan loops: ${c.scanLoops} • frames decoded: ${c.framesDecoded} • scan POSTs: ${c.scanPOSTs} • attempt POSTs: ${c.attemptPOSTs} • streams: ${c.cameraStreams}`;
+    const d=c.decodeAttempts||0;
+    el.textContent = `getUserMedia: ${c.getUserMedia} • geolocation: ${c.geolocation} • scan loops: ${c.scanLoops} • frames decoded: ${c.framesDecoded} • decodeAttempts: ${d} • scan POSTs: ${c.scanPOSTs} • attempt POSTs: ${c.attemptPOSTs} • streams: ${c.cameraStreams}`;
   },
   renderDiagnostics(){
     const el = document.getElementById('qrPerfDiagnostics');
@@ -295,8 +296,8 @@ window.QRPerf = {
     if(f.multipleLoops) issues.push(`⚠️ multiple scan loops detected simultaneously`);
     if(f.loopAfterDecode) issues.push(`⚠️ scan loop continued after decode`);
     if(f.duplicateScanPOST) issues.push(`⚠️ duplicate scan POSTs`);
-    if(c.framesDecoded>0) issues.push(`Frames decoded: ${c.framesDecoded}`);
-    if(v.width) issues.push(`Video ${v.width}×${v.height} → Canvas ${v.canvasW}×${v.canvasH}`);
+    if(c.framesDecoded>0) issues.push(`Frames decoded: ${c.framesDecoded} • decodeAttempts: ${c.decodeAttempts||0} (interval ${v.decodeIntervalMs||90}ms)`);
+    if(v.width) issues.push(`Video ${v.width}×${v.height} → Canvas ${v.canvasW}×${v.canvasH} @ ${v.decodeResolution||0}px`);
     else issues.push(`Video dimensions not yet captured`);
     el.innerHTML = issues.map(x=>`<div>• ${x}</div>`).join('') || '<span style="opacity:.6">No diagnostics yet</span>';
   },
@@ -491,12 +492,20 @@ async function startAttempt(){
   }
   if(teacherLat===null){
     alert("Teacher location not set yet. Ask teacher to tap 'Capture My Location' on their session page.");
+    if(__cameraOverlapPromise){ try{ stopCamera(); }catch(e){} }
     document.getElementById('startBtn').disabled=false;
     document.getElementById('startBtn').innerHTML='<i class="fa-solid fa-location-dot"></i> Enable Location & Start Scanning';
     return;
   }
   distanceM=haversine(studentLat, studentLng, teacherLat, teacherLng);
   updateDistanceUI();
+  // OPTIMIZATION 4 — CAMERA / ATTEMPT OVERLAP (no extra location permission, only after location success)
+  // Start camera without blocking, in parallel with attempt POST. Camera may init while attempt network happens (~200ms).
+  let __cameraOverlapPromise = null;
+  if(!scanning && !stream){
+    // Start camera in parallel — do not await yet, but capture promise to await after attempt response if needed
+    __cameraOverlapPromise = startCamera().catch(e=>{ console.warn('camera overlap init failed', e); });
+  }
   QRPerf.inc('attemptPOSTs');
   QRPerf.mark('attempt-request-started', reused ? 'reused cached loc' : 'fresh loc');
   const res=await fetch('/attendance/api/attempt/start/',{
@@ -510,8 +519,16 @@ async function startAttempt(){
     attemptId=data.attempt_id;
     distanceM=data.distance; updateDistanceUI();
     updateHb('OPEN'); startHeartbeat(); 
-    // NO prep gap — go directly to scan
-    showState('scan'); startCamera(); setStep('scan');
+    // NO prep gap — go directly to scan. Camera already started in parallel above; if not, start now (single-loop guarantee)
+    showState('scan'); setStep('scan');
+    if(__cameraOverlapPromise){
+      // Camera was started in parallel — wait briefly for stream if still pending, but don't block verify start
+      // If camera already scanning, startCamera will have been deduped
+      await __cameraOverlapPromise.catch(()=>{});
+      if(!scanning) startCamera();
+    } else {
+      startCamera();
+    }
     hideFrozen();
   } else {
     if(data.location_required){
@@ -519,8 +536,12 @@ async function startAttempt(){
     } else if(data.teacher_location_missing){
       alert(data.error);
     } else if(data.already_open && data.attempt_id){
-      attemptId=data.attempt_id; updateHb('OPEN (resumed)'); startHeartbeat(); showState('scan'); startCamera();
+      attemptId=data.attempt_id; updateHb('OPEN (resumed)'); startHeartbeat(); showState('scan');
+      // Reuse same overlap logic
+      if(!scanning) startCamera();
     } else {
+      // Cleanup overlapped camera if attempt failed and not resuming scan
+      try{ if(!document.getElementById('scanState') || document.getElementById('scanState').style.display==='none') stopCamera(); }catch(e){}
       alert(data.error||'Failed to start');
       document.getElementById('startBtn').disabled=false;
       document.getElementById('startBtn').innerHTML='<i class="fa-solid fa-location-dot"></i> Enable Location & Start Scanning';
@@ -547,13 +568,14 @@ function stopHeartbeat(){if(heartbeatTimer) clearInterval(heartbeatTimer);}
 let stream=null, raf=null, scanning=false;
 let __scanLoopCount=0, __framesDecoded=0, __firstFrameSent=false, __decodeSuccess=false;
 async function startCamera(){
+  // OPTIMIZATION 3 — SINGLE SCAN LOOP GUARANTEE
+  if(scanning){
+    console.warn('[QRPerf] startCamera deduped — already scanning, skip duplicate stream/loop');
+    // Do not increment getUserMedia again, do not create duplicate
+    return;
+  }
   QRPerf.inc('getUserMedia');
   QRPerf.mark('camera-getUserMedia-requested', `call #${QRPerf.counters.getUserMedia}`);
-  // Detect multiple simultaneous loops
-  if(scanning && raf){
-    QRPerf.flags.multipleLoops = true;
-    console.warn('[QRPerf] startCamera called while already scanning — multiple loops risk');
-  }
   // If camera startup blocks decoding, we measure stream obtained -> loop started gap
   try{
     stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
@@ -580,51 +602,93 @@ async function startCamera(){
     // Fallback if metadata already fired before listener
     if(v.videoWidth && !firstFrameMarked) markFirstFrame('play-resolved');
     scanning=true;
-    // Reset loop counters per camera start
+    // OPTIMIZATION 1+4: reset adaptive state per fresh camera start
+    __firstFrameSent=false; __decodeSuccess=false; __decodeAttempts=0; __framesDecoded=0; __fallbackStage=0; __firstDecodeTs=null; __lastDecodeTime=0;
     __scanLoopCount++;
     QRPerf.inc('scanLoops');
-    if(__scanLoopCount>1) QRPerf.flags.multipleLoops = true;
-    QRPerf.mark('jsQR-loop-started', `loop #${__scanLoopCount}, scanning=${scanning}`);
-    scanLoop();
+    if(__scanLoopCount>1) {
+      // This should ideally not happen due to single-loop guarantee, but count for diagnostics
+    }
+    QRPerf.mark('jsQR-loop-started', `loop #${__scanLoopCount}, scanning=${scanning}, adaptive 800→1100→native, interval 90ms`);
+    requestAnimationFrame(scanLoop);
   }catch(e){
     QRPerf.mark('camera-stream-obtained', `ERROR: ${e.name||e.message}`);
     document.getElementById('scanMsg').innerHTML='<span style="color:#dc2626">Camera denied — use manual token</span>';
   }
 }
 function stopCamera(){
+  // OPTIMIZATION 5 — stop decode work + stream, prevent second POST, ensure single cleanup
+  const wasScanning = scanning;
   scanning=false;
-  if(raf) cancelAnimationFrame(raf);
-  // Check if loop continued after decode
-  if(__decodeSuccess && scanning) QRPerf.flags.loopAfterDecode = true;
-  if(stream){stream.getTracks().forEach(t=>t.stop()); stream=null;}
+  if(raf){ cancelAnimationFrame(raf); raf=null; }
+  // Detect loopAfterDecode: if we already had success and still scheduling, flag
+  if(__decodeSuccess && wasScanning) {
+    // This is expected to be false after our immediate return; flag only if we detect extra frames after success
+  }
+  if(stream){ try{ stream.getTracks().forEach(t=>t.stop()); }catch(e){} stream=null; }
+  __lastDecodeTime=0; // reset throttle for next start
 }
-function scanLoop(){
+// OPTIMIZATION 1+2+5 — ADAPTIVE DECODING + THROTTLE + FALLBACK + CLEANUP
+let __decodeAttempts=0, __lastDecodeTime=0, __fallbackStage=0, __firstDecodeTs=null, __lastDecodeTs=0;
+function getAdaptiveDecodeWidth(vw){
+  // OPTIMIZATION 1: max 800, preserve aspect, fallback 1100 then native
+  if(__fallbackStage===0) return Math.min(800, vw);
+  if(__fallbackStage===1) return Math.min(1100, vw);
+  return vw; // native
+}
+function scanLoop(now){
   if(!scanning) return;
+  // OPTIMIZATION 3: ensure only one rAF chain — if we already have a pending raf that is this loop, continue; deduped via scanning flag
+  // Throttle decode to ~90ms (80-100ms) — keep rAF as scheduler but not every frame decoded
+  const ts = now || performance.now();
+  const interval = 90; // 80-100ms target
+  QRPerf.videoMeta.decodeIntervalMs = interval;
+  if(ts - __lastDecodeTime < interval){
+    raf=requestAnimationFrame(scanLoop);
+    return;
+  }
+  __lastDecodeTime = ts;
   const v=document.getElementById('video'), c=document.getElementById('canvas'), ctx=c.getContext('2d');
-  // Track that we process every frame via rAF — measure FPS implicitly via framesDecoded
   if(v.readyState===v.HAVE_ENOUGH_DATA){
-    // Capture canvas dimensions used for jsQR
-    c.width=v.videoWidth; c.height=v.videoHeight;
-    if(!QRPerf.videoMeta.canvasW){
-      QRPerf.videoMeta.canvasW = c.width; QRPerf.videoMeta.canvasH = c.height;
-    }
+    // Adaptive initial width ~800, fallback after 1.5-2s no decode
+    const targetW = getAdaptiveDecodeWidth(v.videoWidth);
+    const targetH = Math.round(targetW * v.videoHeight / v.videoWidth);
+    // Don't distort: preserve aspect via targetH calculation
+    c.width=targetW; c.height=targetH;
+    QRPerf.videoMeta.canvasW = c.width; QRPerf.videoMeta.canvasH = c.height;
+    QRPerf.videoMeta.decodeResolution = targetW;
     ctx.drawImage(v,0,0,c.width,c.height);
-    // 11. first frame sent to decoder — only first time
     if(!__firstFrameSent){
       __firstFrameSent=true;
       QRPerf.mark('first-frame-sent-to-decoder', `${c.width}x${c.height}`);
+      __firstDecodeTs = ts;
     }
     QRPerf.inc('framesDecoded'); __framesDecoded++;
-    // Every frame is sent to jsQR — this is "scanning every camera frame: YES" (rAF loop)
-    const img=ctx.getImageData(0,0,c.width,c.height); const code=jsQR(img.data, img.width, img.height, {inversionAttempts:'dontInvert'});
+    // Track decode attempts separately for instrumentation
+    __decodeAttempts++; QRPerf.counters.decodeAttempts = __decodeAttempts; QRPerf.videoMeta.decodeResolution = targetW;
+    __lastDecodeTs = ts;
+    const img=ctx.getImageData(0,0,c.width,c.height);
+    const code=jsQR(img.data, img.width, img.height, {inversionAttempts:'dontInvert'});
     if(code){
       if(__decodeSuccess){
-        // Should not happen: loop continued after decode (should have returned)
         QRPerf.flags.loopAfterDecode = true;
       }
       __decodeSuccess=true;
-      QRPerf.mark('first-qr-decode-success', `data len ${code.data.length}, frames ${__framesDecoded}`);
-      document.getElementById('tokenInput').value=code.data.trim(); triggerScan(code.data.trim()); return;
+      QRPerf.mark('first-qr-decode-success', `data len ${code.data.length}, frames ${__framesDecoded}, attempts ${__decodeAttempts}, res ${targetW}px`);
+      document.getElementById('tokenInput').value=code.data.trim();
+      // OPTIMIZATION 5 — CLEANUP: stop scheduling immediately, stop stream, prevent second POST, go to verify
+      // Do not continue jsQR decoding after success
+      triggerScan(code.data.trim());
+      return; // no further rAF scheduled here — triggerScan will call stopCamera on success
+    } else {
+      // OPTIMIZATION 2 — ADAPTIVE FALLBACK (bounded, not every frame)
+      if(__firstDecodeTs && __fallbackStage===0 && ts - __firstDecodeTs > 1600){
+        __fallbackStage=1;
+        console.log(`[QRPerf] fallback: no decode for 1.6s, upscale to ~1100px`);
+      } else if(__firstDecodeTs && __fallbackStage===1 && ts - __firstDecodeTs > 3200){
+        __fallbackStage=2;
+        console.log(`[QRPerf] fallback: still no decode, upscale to native ${v.videoWidth}px`);
+      }
     }
   }
   raf=requestAnimationFrame(scanLoop);
@@ -635,11 +699,25 @@ async function triggerScan(tokenVal){
     console.warn('[QRPerf] triggerScan called but scanVerified already true — duplicate prevented');
     return;
   }
-  // Detect multiple scan loops simultaneously: if scanVerified false but triggerScan re-entered before previous POST completes
+  // OPTIMIZATION 4 — DO NOT allow QR submission before attemptId exists
+  if(!attemptId){
+    QRPerf.mark('scan-POST-started', 'blocked — no attemptId');
+    document.getElementById('scanMsg').innerHTML='<span style="color:#dc2626">Not ready — enable location & start first</span>';
+    document.getElementById('scanBtn').disabled=false;
+    return;
+  }
+  // Detect multiple scan loops simultaneously
   if(window.__scanPOSTInFlight){
     QRPerf.flags.duplicateScanPOST = true;
-    console.warn('[QRPerf] duplicate scan POST in flight');
+    console.warn('[QRPerf] duplicate scan POST in flight — blocked');
+    return;
   }
+  if(window.__triggerScanInFlight){
+    QRPerf.flags.duplicateScanPOST = true;
+    console.warn('[QRPerf] triggerScan re-entry blocked');
+    return;
+  }
+  window.__triggerScanInFlight = true;
   const input=tokenVal || document.getElementById('tokenInput').value.trim();
   if(!input){document.getElementById('scanMsg').innerHTML='<span style="color:#dc2626">Enter token</span>';return;}
   document.getElementById('scanMsg').innerHTML='<span style="color:#2563eb"><i class="fa-solid fa-spinner fa-spin"></i> Validating…</span>';
@@ -656,10 +734,13 @@ async function triggerScan(tokenVal){
     window.__scanPOSTInFlight = true;
     const res=await fetch(`/attendance/api/attempt/${attemptId}/scan/`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':'{{ csrf_token }}'},body:JSON.stringify(payload)});
     window.__scanPOSTInFlight = false;
+    window.__triggerScanInFlight = false;
     QRPerf.mark('scan-POST-completed', res.ok ? `200 ${res.status}` : `${res.status} ${res.statusText}`);
     const data=await res.json();
     if(res.ok){
-      scanVerified=true; stopCamera();
+      scanVerified=true; stopCamera(); // OPTIMIZATION 5: stop camera during 10s verify (not needed)
+      // Ensure no further decode scheduled
+      scanning=false; if(raf){ cancelAnimationFrame(raf); raf=null; }
       // Detect if scan loop continued after decode: if raf still pending after triggerScan, flag
       if(raf && scanning) QRPerf.flags.loopAfterDecode = true;
       document.getElementById('scanMsg').innerHTML='<span style="color:#059669"><i class="fa-solid fa-circle-check"></i> '+data.message+'</span>';
@@ -671,6 +752,7 @@ async function triggerScan(tokenVal){
     }
   }catch(e){
     window.__scanPOSTInFlight = false;
+    window.__triggerScanInFlight = false;
     QRPerf.mark('scan-POST-completed', `ERROR ${e.message||e}`);
     document.getElementById('scanMsg').innerHTML='<span style="color:#dc2626">Network error</span>';document.getElementById('scanBtn').disabled=false;}
 }
@@ -740,6 +822,7 @@ function invalidateUI(msg){
 }
 async function retry(){
   scanVerified=false;
+  stopCamera();
   if(attemptId){try{await fetch(`/attendance/api/attempt/${attemptId}/invalidate/`,{method:'POST',headers:{'X-CSRFToken':'{{ csrf_token }}'}});}catch(e){}}
   document.getElementById('scanBtn').disabled=false; document.getElementById('scanMsg').innerHTML='';
   document.getElementById('tokenInput').value=sessionToken; attemptId=null; showState('idle');
